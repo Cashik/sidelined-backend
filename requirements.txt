@@ -1,0 +1,13 @@
+fastapi
+pydantic
+pydantic-settings
+python-dotenv
+uvicorn
+sqlalchemy
+psycopg2-binary
+pyjwt
+python-jose
+alembic
+openai
+
+
