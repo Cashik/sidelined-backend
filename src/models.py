@@ -3,13 +3,10 @@ from enum import Enum
 from uuid import uuid4
 from typing import Optional, List, Dict, ClassVar
 from sqlalchemy import Enum
-from pytz import timezone
 from dataclasses import dataclass
 from decimal import Decimal
 import time
 from src import enums, schemas
-from src.components.rank_system import RankSystem, RankConfig
-from sqlalchemy.ext.hybrid import hybrid_property
 
 """
 tokens - токены overseer

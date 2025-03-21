@@ -12,17 +12,11 @@ logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import UJSONResponse, JSONResponse
-from starlette.middleware import Middleware
-from starlette.middleware.sessions import SessionMiddleware
-from starlette_admin import BaseAdmin, DropDown
-from sqlmodel import Session, SQLModel
 from sqlalchemy import text
 
 from src.config import settings
 from src.database import get_session
 from src.models import *
-from src import routers
-from src.events import register_all_events
 
 app = FastAPI(
     title="2Eden API - Swagger UI",
@@ -30,7 +24,6 @@ app = FastAPI(
     prefix="/api"
 )
 
-register_all_events()
 
 @app.get("/health")
 async def health_check():

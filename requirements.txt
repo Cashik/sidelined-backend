@@ -4,6 +4,7 @@ pydantic-settings
 python-dotenv
 uvicorn
 sqlalchemy
+sqlmodel
 psycopg2-binary
 pyjwt
 python-jose
