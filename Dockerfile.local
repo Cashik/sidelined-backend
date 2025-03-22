@@ -14,6 +14,6 @@ RUN pip install -r requirements.txt
 #! src files must be mounted to /app/src from the docker-compose.yml file
 
 # todo: add alembic
-#CMD alembic upgrade head 
+CMD alembic upgrade head 
 
 CMD uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload

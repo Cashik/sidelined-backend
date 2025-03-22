@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # Default 30 minutes
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # For future implementation refresh tokens
     
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://alpha.outerworldagentz.ai,https://alpha.outerworldagentz.ai,ws://alpha.outerworldagentz.ai,wss://alpha.outerworldagentz.ai"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
     MAX_DAILY_QUESTIONS: int = 3
 
     # OpenAI and AI settings

@@ -11,16 +11,17 @@ logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import UJSONResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from src.config import settings
 from src.database import get_session
 from src.models import *
+from src.routers import auth
 
 app = FastAPI(
     title="2Eden API - Swagger UI",
-    default_response_class=UJSONResponse,
+    default_response_class=JSONResponse,
     prefix="/api"
 )
 
@@ -60,7 +61,7 @@ def get_db():
         db.close()
 
 # Подключаем роутеры
-
+app.include_router(auth.router)
 
 if __name__ == "__main__":
     import uvicorn

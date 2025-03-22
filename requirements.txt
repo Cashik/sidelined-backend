@@ -10,5 +10,6 @@ pyjwt
 python-jose
 alembic
 openai
-
-
+eth-account
+eth-utils
+siwe
