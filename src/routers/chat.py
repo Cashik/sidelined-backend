@@ -62,8 +62,8 @@ async def create_message(create_message_request: schemas.MessageCreate, user: mo
     # TODO: стоит ли доверять nonce с клиента? если нет, то нужно отделить возможность возвращаться к старым сообщениям в отдельный метод
     user_message = schemas.Message(
         content=create_message_request.message,
-        sender=enums.Role.user,
-        recipient=enums.Role.assistant,
+        sender=enums.Role.USER,
+        recipient=enums.Role.ASSISTANT,
         model=create_message_request.model,
         nonce=create_message_request.nonce,
         created_at=utils.now_timestamp(),
