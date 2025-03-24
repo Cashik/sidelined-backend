@@ -23,20 +23,24 @@ class User(SQLModel, table=True):
     address: str
     chain_id: int
     created_at: int = Field(default_factory=now_timestamp)
+    
+    # Relationships
+    chats: List["Chat"] = Relationship(back_populates="user")
 
 class Chat(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int
+    user_id: int = Field(foreign_key="user.id")
     created_at: int = Field(default_factory=now_timestamp)
     title: str
     visible: bool = Field(default=True)
     
     # Relationships
     user: User = Relationship(back_populates="chats")
+    messages: List["Message"] = Relationship(back_populates="chat")
     
 class Message(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    chat_id: int
+    chat_id: int = Field(foreign_key="chat.id")
     content: str
     # поля для определения роли и получателей сообщения
     sender: enums.Role = Field(sa_column=Enum(enums.Role))
