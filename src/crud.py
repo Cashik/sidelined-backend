@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
-from sqlmodel import Session, select, delete, or_
+from typing import List, Optional, Tuple, Dict
+from sqlmodel import Session, select, delete, or_, and_, func
 import random
-from sqlalchemy import func
+from sqlalchemy import func, desc
 import time
 
 from src import models, schemas, enums, exceptions
@@ -26,14 +26,222 @@ async def get_or_create_user(address: str, chain_id: int, session: Session) -> m
 
 
 async def get_user_by_id(user_id: int, session: Session) -> Optional[models.User]:
-    """
-    Получает пользователя по id
-    
-    Args:
-        user_id (int): ID пользователя
-        session (Session): Сессия базы данных
-        
-    Returns:
-        Optional[models.User]: Объект пользователя или None, если пользователь не найден
-    """
     return session.exec(select(models.User).where(models.User.id == user_id)).first()
+
+
+async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.ChatSummary]:
+    """
+    Получение списка чатов пользователя с краткой информацией:
+    - id чата
+    - название чата
+    - время последнего изменения
+    """
+    # Получаем чаты пользователя, которые не удалены (visible=True)
+    chats_query = select(models.Chat).where(
+        models.Chat.user_id == user_id,
+        models.Chat.visible == True
+    ).order_by(desc(models.Chat.created_at))
+    
+    chats = db.exec(chats_query).all()
+    
+    # Получаем время последнего сообщения для каждого чата
+    result = []
+    for chat in chats:
+        # Находим последнее сообщение для определения времени обновления
+        last_message_query = select(models.Message).where(
+            models.Message.chat_id == chat.id
+        ).order_by(desc(models.Message.created_at)).limit(1)
+        
+        last_message = db.exec(last_message_query).first()
+        
+        # Используем время последнего сообщения или время создания чата, если сообщений нет
+        last_updated_at = last_message.created_at if last_message else chat.created_at
+        
+        # Создаем объект ChatSummary
+        result.append(schemas.ChatSummary(
+            id=chat.id,
+            title=chat.title,
+            last_updated_at=last_updated_at
+        ))
+    
+    return result
+
+
+async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Optional[int] = None, to_nonce: Optional[int] = None) -> schemas.Chat:
+    """
+    Получение информации о чате пользователя с сообщениями в диапазоне nonce
+    from_nonce - с какого nonce начать (включительно)
+    to_nonce - до какого nonce включать (включительно)
+    Если from_nonce=None, начинает с начала чата
+    Если to_nonce=None, включает до последнего сообщения
+    если чат не найден или не принадлежит пользователю, то ошибка
+    """
+    # Получаем чат
+    chat = db.exec(select(models.Chat).where(
+        models.Chat.id == chat_id,
+        models.Chat.visible == True
+    )).first()
+    
+    # Проверяем, существует ли чат
+    if not chat:
+        raise exceptions.ChatNotFoundException()
+    
+    # Проверяем, принадлежит ли чат пользователю
+    if chat.user_id != user_id:
+        raise exceptions.UserNotChatOwnerException()
+    
+    # Формируем запрос для получения сообщений с учетом nonce
+    messages_query = select(models.Message).where(
+        models.Message.chat_id == chat_id
+    )
+    
+    # Добавляем условия для from_nonce и to_nonce, если они указаны
+    if from_nonce is not None:
+        messages_query = messages_query.where(models.Message.nonce >= from_nonce)
+    
+    if to_nonce is not None:
+        messages_query = messages_query.where(models.Message.nonce <= to_nonce)
+    
+    # Сортируем сообщения по nonce и selected_at
+    messages_query = messages_query.order_by(
+        models.Message.nonce, 
+        desc(models.Message.selected_at)
+    )
+    
+    messages = db.exec(messages_query).all()
+    
+    # Группируем сообщения по nonce, отбирая последнее выбранное для каждого nonce
+    messages_dict: Dict[int, List[schemas.Message]] = {}
+    
+    for message in messages:
+        # Преобразуем модель в схему
+        schema_message = schemas.Message(
+            content=message.content,
+            sender=message.sender,
+            recipient=message.recipient,
+            model=message.model,
+            nonce=message.nonce,
+            created_at=message.created_at,
+            selected_at=message.selected_at
+        )
+        
+        # Группируем сообщения по nonce
+        if message.nonce not in messages_dict:
+            messages_dict[message.nonce] = []
+        
+        messages_dict[message.nonce].append(schema_message)
+    
+    # Создаем объект Chat
+    return schemas.Chat(
+        id=chat.id,
+        title=chat.title,
+        messages=messages_dict
+    )
+
+
+async def add_message(db: Session, chat_id: Optional[int], message: schemas.Message, user_id: int) -> schemas.Chat:
+    """
+    Добавление сообщения в чат
+    Если chat_id не указан, создается новый чат
+    Если nonce указан в сообщении, то все последующие сообщения удаляются
+    Если nonce указан и в чате есть сообщение с таким nonce, но роль не юзерская, то ошибка
+    Если nonce не указан, то добавляется в конец чата
+    """
+    # Если chat_id не указан, создаем новый чат
+    if chat_id is None:
+        # Генерируем заголовок чата из первых слов сообщения
+        title = message.content.strip()[:30] + "..." if len(message.content) > 30 else message.content
+        
+        # Создаем новый чат
+        new_chat = models.Chat(
+            user_id=user_id,
+            title=title,
+            created_at=message.created_at  # Используем время создания сообщения
+        )
+        
+        db.add(new_chat)
+        db.commit()
+        db.refresh(new_chat)
+        
+        chat_id = new_chat.id
+    else:
+        # Проверяем существование чата и права доступа
+        chat = db.exec(select(models.Chat).where(
+            models.Chat.id == chat_id,
+            models.Chat.visible == True
+        )).first()
+        
+        if not chat:
+            raise exceptions.ChatNotFoundException()
+        
+        if chat.user_id != user_id:
+            raise exceptions.UserNotChatOwnerException()
+    
+    # Проверяем, если nonce уже существует и это сообщение ассистента
+    existing_message = db.exec(select(models.Message).where(
+        models.Message.chat_id == chat_id,
+        models.Message.nonce == message.nonce
+    )).first()
+    
+    if existing_message and existing_message.sender == enums.Role.ASSISTANT and message.sender == enums.Role.USER:
+        raise exceptions.InvalidNonceException()
+    
+    # Удаляем все сообщения с большим nonce
+    db.exec(delete(models.Message).where(
+        models.Message.chat_id == chat_id,
+        models.Message.nonce > message.nonce
+    ))
+    
+    # Создаем новое сообщение
+    new_message = models.Message(
+        chat_id=chat_id,
+        content=message.content,
+        sender=message.sender,
+        recipient=message.recipient,
+        service=enums.Service.OPENAI,  # По умолчанию OpenAI
+        model=message.model,
+        nonce=message.nonce,
+        created_at=message.created_at,
+        selected_at=message.selected_at
+    )
+    
+    db.add(new_message)
+    db.commit()
+    
+    # Возвращаем обновленный чат
+    return await get_user_chat(db, chat_id, user_id)
+
+
+async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
+    """
+    Удаление чата пользователя (скрытие через флаг visible)
+    если чат не найден или не принадлежит пользователю, то ошибка
+    """
+    # Получаем чат
+    chat = db.exec(select(models.Chat).where(
+        models.Chat.id == chat_id,
+        models.Chat.visible == True
+    )).first()
+    
+    # Проверяем, существует ли чат
+    if not chat:
+        raise exceptions.ChatNotFoundException()
+    
+    # Проверяем, принадлежит ли чат пользователю
+    if chat.user_id != user_id:
+        raise exceptions.UserNotChatOwnerException()
+    
+    # Скрываем чат (устанавливаем visible=False)
+    chat.visible = False
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+    
+    # Создаем схему чата для ответа
+    return schemas.Chat(
+        id=chat.id,
+        title=chat.title,
+        messages={}  # Пустой словарь сообщений
+    )
+
+

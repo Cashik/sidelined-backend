@@ -17,7 +17,7 @@ from sqlalchemy import text
 from src.config import settings
 from src.database import get_session
 from src.models import *
-from src.routers import auth
+from src.routers import auth, chat
 
 app = FastAPI(
     title="2Eden API - Swagger UI",
@@ -62,6 +62,7 @@ def get_db():
 
 # Подключаем роутеры
 app.include_router(auth.router)
+app.include_router(chat.router)
 
 if __name__ == "__main__":
     import uvicorn

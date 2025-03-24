@@ -3,8 +3,6 @@ from eth_account import Account
 from eth_utils import to_checksum_address, is_address, is_checksum_address
 import json
 import logging
-# Импортируем библиотеку SIWE
-from siwe import SiweMessage
 
 from src import schemas
 
@@ -13,7 +11,7 @@ logger = logging.getLogger(__name__)
 def verify_signature(payload: schemas.LoginPayload, signature: str) -> bool:
     """
     Проверяет, что подпись была создана владельцем указанного адреса
-    с использованием стандарта SIWE (Sign-In with Ethereum)
+    с использованием переписанного кода из клиенской библиотеки thirdweb 
     
     Args:
         payload: данные, которые были подписаны

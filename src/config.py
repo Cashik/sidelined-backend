@@ -42,9 +42,10 @@ class Settings(BaseSettings):
     MAX_DAILY_QUESTIONS: int = 3
 
     # OpenAI and AI settings
-    OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o-mini"
     MAX_DAILY_MESSAGES: int = 10
+    DEFAULT_CHAT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
     
     @property
     def DATABASE_URL(self) -> str:

@@ -1,18 +1,13 @@
 from datetime import datetime, timedelta
-from enum import Enum
-from uuid import uuid4
 from typing import Optional, List, Dict, ClassVar
-from sqlalchemy import Enum
-from sqlmodel import Field, SQLModel
-from dataclasses import dataclass
-from decimal import Decimal
+from sqlmodel import Field, SQLModel, Enum, Relationship
+
 import time
+
 from src import enums, schemas
 
-"""
-tokens - токены overseer
-coins - монеты в нутри приложения
-"""
+# todo: файлы к сообщениям
+
 
 # Функция для получения текущего timestamp в секундах
 def now_timestamp():
@@ -28,4 +23,33 @@ class User(SQLModel, table=True):
     address: str
     chain_id: int
     created_at: int = Field(default_factory=now_timestamp)
+
+class Chat(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int
+    created_at: int = Field(default_factory=now_timestamp)
+    title: str
+    visible: bool = Field(default=True)
+    
+    # Relationships
+    user: User = Relationship(back_populates="chats")
+    
+class Message(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chat_id: int
+    content: str
+    # поля для определения роли и получателей сообщения
+    sender: enums.Role = Field(sa_column=Enum(enums.Role))
+    recipient: enums.Role = Field(sa_column=Enum(enums.Role))
+    # источник генерации (последний выбранный)
+    service: enums.Service = Field(sa_column=Enum(enums.Service))
+    model: enums.Model = Field(sa_column=Enum(enums.Model))
+    # поля для определения порядка сообщений
+    nonce: int # порядковый номер сообщения в чате
+    created_at: int = Field(default_factory=now_timestamp)
+    selected_at: int = Field(default_factory=now_timestamp) # для выбора одного из нескольких вариантов с одинаковым порядковым номером
+    
+    # Relationships
+    chat: Chat = Relationship(back_populates="messages")
+    
 

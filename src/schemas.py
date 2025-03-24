@@ -7,9 +7,12 @@ import time
 from src import enums
 
 
+# схемы роутера auth
+
 class LoginPayloadRequest(BaseModel):
     address: str
     chainId: int
+
 
 class LoginPayload(BaseModel):
     domain: str
@@ -21,15 +24,51 @@ class LoginPayload(BaseModel):
     nonce: str
     issued_at: str
     expiration_time: str
-    
+
+
 class LoginRequest(BaseModel):
     payload: LoginPayload
     signature: str
-    
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    
+
+
 class IsLoginResponse(BaseModel):
     logged_in: bool
 
+# внутренние схемы чата с ИИ
+
+class Message(BaseModel):
+    content: str
+    sender: enums.Role
+    recipient: enums.Role
+    model: enums.Model
+    nonce: int
+    created_at: int
+    selected_at: int
+
+class MessageCreate(BaseModel):
+    chat_id: Optional[int] = None
+    nonce: int # для изменения старого сообщения
+    message: str
+    model: enums.Model
+    
+
+class Chat(BaseModel):
+    id: int
+    title: str
+    messages: Dict[int, List[Message]] # nonce: [message, message, ...]
+
+class ChatSummary(BaseModel):
+    id: int
+    title: str
+    last_updated_at: int
+    
+
+# схемы роутера chats
+
+    
+    
