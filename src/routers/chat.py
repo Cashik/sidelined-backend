@@ -37,6 +37,9 @@ class RegenerateMessageRequest(BaseModel):
 class ChatDeleteRequest(BaseModel):
     chat_id: int
 
+class DeleteResponse(BaseModel):
+    success: bool = True
+
 
 @router.get("/providers", response_model=ProvidersResponse)
 async def get_providers():
@@ -86,7 +89,7 @@ async def regenerate_message(request: RegenerateMessageRequest, user: models.Use
     chat: schemas.Chat = await crud.add_message(db, chat.id, answer_message, user.id)
     return CreateMessageResponse(chat=chat, answer_message=answer_message)
 
-@router.post("/delete", response_model=CreateMessageResponse)
+@router.post("/delete", response_model=DeleteResponse)
 async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    chat: schemas.Chat = await crud.delete_chat(db, request.chat_id, user.id)
-    return CreateMessageResponse(chat=chat, answer_message=None)
+    await crud.delete_chat(db, request.chat_id, user.id)
+    return DeleteResponse()
