@@ -32,6 +32,8 @@ class RegenerateMessageRequest(BaseModel):
     chat_id: int
     nonce: int
     model: enums.Model
+    chat_style: Optional[enums.ChatStyle] = None
+    chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
 class ChatDeleteRequest(BaseModel):
     chat_id: int
@@ -68,6 +70,8 @@ async def create_message(create_message_request: schemas.MessageCreate, user: mo
         recipient=enums.Role.ASSISTANT,
         model=create_message_request.model,
         nonce=create_message_request.nonce,
+        chat_style=create_message_request.chat_style,
+        chat_details_level=create_message_request.chat_details_level,
         created_at=utils.now_timestamp(),
         selected_at=utils.now_timestamp(),
     )

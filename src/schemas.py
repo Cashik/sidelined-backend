@@ -64,7 +64,8 @@ class MessageCreate(BaseModel):
     nonce: int # для изменения старого сообщения
     message: str
     model: enums.Model
-    
+    chat_style: Optional[enums.ChatStyle] = None
+    chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
 class Chat(BaseModel):
     id: int
