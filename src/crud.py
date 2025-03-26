@@ -259,3 +259,48 @@ async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     )
 
 
+async def update_user_chat_settings(
+    user_id: int,
+    settings: schemas.UserChatSettings,
+    session: Session
+) -> models.User:
+    """
+    Обновление настроек чата пользователя
+    """
+    user = await get_user_by_id(user_id, session)
+    if not user:
+        raise exceptions.UserNotFoundException()
+    
+    # Обновляем все поля, включая None
+    user.preffered_chat_model = settings.preffered_chat_model
+    user.preffered_chat_style = settings.preffered_chat_style
+    user.preffered_chat_details_level = settings.preffered_chat_details_level
+    
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+async def update_user_profile(
+    user_id: int,
+    profile: schemas.UserProfile,
+    session: Session
+) -> models.User:
+    """
+    Обновление профиля пользователя
+    """
+    user = await get_user_by_id(user_id, session)
+    if not user:
+        raise exceptions.UserNotFoundException()
+    
+    # Обновляем все поля, включая None
+    user.preffered_name = profile.preffered_name
+    user.user_context = profile.user_context
+    
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
