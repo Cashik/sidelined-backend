@@ -16,7 +16,7 @@ class Service(Enum):
     
 
 class Model(Enum):
-    GPT_4 = "o1-preview"
+    GPT_4 = "gpt-4"
     GPT_4O = "gpt-4o"
     GPT_4O_MINI = "gpt-4o-mini"
     

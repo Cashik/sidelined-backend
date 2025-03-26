@@ -23,7 +23,6 @@ class ChatResponse(BaseModel):
 
 class ProvidersResponse(BaseModel):
     models: List[enums.Model]
-    services: List[enums.Service]
 
 class CreateMessageResponse(BaseModel):
     chat: schemas.Chat
@@ -45,7 +44,7 @@ class DeleteResponse(BaseModel):
 async def get_providers():
     # TODO: добавить выключение моделей и сервисов
     # TODO: добавить кеширование данного ответа
-    return ProvidersResponse(models=list(enums.Model), services=list(enums.Service))
+    return ProvidersResponse(models=list(enums.Model))
 
 @router.get("/all", response_model=ChatsResponse)
 async def get_chats(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
