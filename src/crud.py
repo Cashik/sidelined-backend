@@ -272,9 +272,9 @@ async def update_user_chat_settings(
         raise exceptions.UserNotFoundException()
     
     # Обновляем все поля, включая None
-    user.preffered_chat_model = settings.preffered_chat_model
-    user.preffered_chat_style = settings.preffered_chat_style
-    user.preffered_chat_details_level = settings.preffered_chat_details_level
+    user.preferred_chat_model = settings.preferred_chat_model
+    user.preferred_chat_style = settings.preferred_chat_style
+    user.preferred_chat_details_level = settings.preferred_chat_details_level
     
     session.add(user)
     session.commit()
@@ -295,7 +295,7 @@ async def update_user_profile(
         raise exceptions.UserNotFoundException()
     
     # Обновляем все поля, включая None
-    user.preffered_name = profile.preffered_name
+    user.preferred_name = profile.preferred_name
     user.user_context = profile.user_context
     
     session.add(user)

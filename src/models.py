@@ -30,11 +30,11 @@ class User(Base):
     created_at = Column(Integer, default=now_timestamp)
     
     # информация о пользователе
-    preffered_name = Column(String(20), nullable=True)
+    preferred_name = Column(String(20), nullable=True)
     user_context = Column(String(500), nullable=True)
-    preffered_chat_model = Column(postgresql.ENUM(enums.Model), nullable=True, default=None)
-    preffered_chat_style = Column(postgresql.ENUM(enums.ChatStyle), nullable=True, default=None)
-    preffered_chat_details_level = Column(postgresql.ENUM(enums.ChatDetailsLevel), nullable=True, default=None)
+    preferred_chat_model = Column(postgresql.ENUM(enums.Model), nullable=True, default=None)
+    preferred_chat_style = Column(postgresql.ENUM(enums.ChatStyle), nullable=True, default=None)
+    preferred_chat_details_level = Column(postgresql.ENUM(enums.ChatDetailsLevel), nullable=True, default=None)
     
     # Relationships
     chats = relationship("Chat", back_populates="user")

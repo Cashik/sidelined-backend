@@ -29,11 +29,11 @@ def upgrade() -> None:
     sa.Column('address', sa.String(), nullable=True),
     sa.Column('chain_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.Integer(), nullable=True),
-    sa.Column('preffered_name', sa.String(length=20), nullable=True),
+    sa.Column('preferred_name', sa.String(length=20), nullable=True),
     sa.Column('user_context', sa.String(length=500), nullable=True),
-    sa.Column('preffered_chat_model', postgresql.ENUM('GPT_4', 'GPT_4O', 'GPT_4O_MINI', name='model', create_type=False), nullable=True),
-    sa.Column('preffered_chat_style', postgresql.ENUM('FORMAL', 'INFORMAL', name='chatstyle', create_type=False), nullable=True),
-    sa.Column('preffered_chat_details_level', postgresql.ENUM('HIGH', 'MEDIUM', 'LOW', name='chatdetailslevel', create_type=False), nullable=True),
+    sa.Column('preferred_chat_model', postgresql.ENUM('GPT_4', 'GPT_4O', 'GPT_4O_MINI', name='model', create_type=False), nullable=True),
+    sa.Column('preferred_chat_style', postgresql.ENUM('FORMAL', 'INFORMAL', name='chatstyle', create_type=False), nullable=True),
+    sa.Column('preferred_chat_details_level', postgresql.ENUM('HIGH', 'MEDIUM', 'LOW', name='chatdetailslevel', create_type=False), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_user_id'), 'user', ['id'], unique=False)

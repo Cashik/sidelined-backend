@@ -28,13 +28,13 @@ async def get_user(user: models.User = Depends(get_current_user), db: Session = 
         address=user_data.address,
         chain_id=user_data.chain_id,
         profile=schemas.UserProfile(
-            preffered_name=user_data.preffered_name,
+            preferred_name=user_data.preferred_name,
             user_context=user_data.user_context
         ),
         chat_settings=schemas.UserChatSettings(
-            preffered_chat_model=user_data.preffered_chat_model,
-            preffered_chat_style=user_data.preffered_chat_style,
-            preffered_chat_details_level=user_data.preffered_chat_details_level
+            preferred_chat_model=user_data.preferred_chat_model,
+            preferred_chat_style=user_data.preferred_chat_style,
+            preferred_chat_details_level=user_data.preferred_chat_details_level
         )
     )
 
@@ -50,9 +50,9 @@ async def get_available_settings():
 async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     user_data: models.User = await crud.update_user_chat_settings(user.id, request, db)
     return schemas.UserChatSettings(
-        preffered_chat_model=user_data.preffered_chat_model,
-        preffered_chat_style=user_data.preffered_chat_style,
-        preffered_chat_details_level=user_data.preffered_chat_details_level
+        preferred_chat_model=user_data.preferred_chat_model,
+        preferred_chat_style=user_data.preferred_chat_style,
+        preferred_chat_details_level=user_data.preferred_chat_details_level
     )
 
 @router.post("/settings/profile", response_model=schemas.User)
@@ -62,13 +62,13 @@ async def update_user_settings(request: UserProfileUpdateRequest, user: models.U
         address=user_data.address,
         chain_id=user_data.chain_id,
         profile=schemas.UserProfile(
-            preffered_name=user_data.preffered_name,
+            preferred_name=user_data.preferred_name,
             user_context=user_data.user_context
         ),
         chat_settings=schemas.UserChatSettings(
-            preffered_chat_model=user_data.preffered_chat_model,
-            preffered_chat_style=user_data.preffered_chat_style,
-            preffered_chat_details_level=user_data.preffered_chat_details_level
+            preferred_chat_model=user_data.preferred_chat_model,
+            preferred_chat_style=user_data.preferred_chat_style,
+            preferred_chat_details_level=user_data.preferred_chat_details_level
         )
     )
 

@@ -43,13 +43,13 @@ class IsLoginResponse(BaseModel):
 # схемы роутера user
 
 class UserProfile(BaseModel):
-    preffered_name: Optional[str] = None
+    preferred_name: Optional[str] = None
     user_context: Optional[str] = None
 
 class UserChatSettings(BaseModel):
-    preffered_chat_model: Optional[enums.Model] = None
-    preffered_chat_style: Optional[enums.ChatStyle] = None
-    preffered_chat_details_level: Optional[enums.ChatDetailsLevel] = None
+    preferred_chat_model: Optional[enums.Model] = None
+    preferred_chat_style: Optional[enums.ChatStyle] = None
+    preferred_chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
 class User(BaseModel):
     address: str
