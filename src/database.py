@@ -1,9 +1,10 @@
-from sqlmodel import create_engine, Session
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 from src.config import settings
 import logging
 import time
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import text
+from typing import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -69,17 +70,23 @@ except Exception as e:
     logger.error(f"Failed to create database engine: {str(e)}")
     raise
 
-def get_session():
+# Создаем фабрику сессий
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_session() -> Generator[Session, None, None]:
     """Получение сессии базы данных с логированием состояния пула"""
     try:
-        with Session(engine) as session:
-            if not settings.TESTING:  # Логируем состояние пула только для PostgreSQL
-                logger.debug(
-                    f"DB Pool Status - Checked in: {engine.pool.checkedin()}, "
-                    f"Checked out: {engine.pool.checkedout()}, "
-                    f"Size: {engine.pool.size()}"
-                )
+        session = SessionLocal()
+        if not settings.TESTING:  # Логируем состояние пула только для PostgreSQL
+            logger.debug(
+                f"DB Pool Status - Checked in: {engine.pool.checkedin()}, "
+                f"Checked out: {engine.pool.checkedout()}, "
+                f"Size: {engine.pool.size()}"
+            )
+        try:
             yield session
+        finally:
+            session.close()
     except Exception as e:
         logger.error(f"Database session error: {str(e)}")
         raise

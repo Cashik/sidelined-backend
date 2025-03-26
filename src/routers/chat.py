@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
-from sqlmodel import Session
+from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from src import schemas, enums, models, crud, utils

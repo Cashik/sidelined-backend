@@ -3,14 +3,11 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from sqlalchemy.types import Enum
-import alembic_postgresql_enum
 
 from alembic import context
 
 # Импортируем все необходимые модели
-from sqlmodel import SQLModel
-# Просто импортируем models, он сам зарегистрирует все модели
-from src.models import *  # noqa
+from src.models import Base  # noqa
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -23,22 +20,12 @@ if config.config_file_name is not None:
 
 from src.config import settings
 
-# Используем уже готовые метаданные
-target_metadata = SQLModel.metadata
+# Используем метаданные из Base
+target_metadata = Base.metadata
 
 def get_url():
     return settings.DATABASE_URL
 
-# Функция для обработки ENUM типов, предотвращающая их пересоздание
-def render_item(type_, obj, autogen_context):
-    """
-    Переопределяем рендеринг для исключения повторного создания ENUM типов
-    """
-    # Обрабатываем ENUM типы, чтобы не создавать их заново
-    if type_ == 'type' and isinstance(obj, Enum):
-        return None  # Пропускаем генерацию кода для ENUM типов
-    # Используем стандартное поведение для других типов
-    return False
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -83,7 +70,6 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection, 
             target_metadata=target_metadata,
-            render_item=render_item  # Добавляем функцию для обработки ENUM типов
         )
 
         with context.begin_transaction():

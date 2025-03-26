@@ -1,9 +1,8 @@
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
-from sqlmodel import Session
 from typing import Optional
-
+from sqlalchemy.orm import Session
 from src.core.auth import decode_token
 from src.database import get_session
 from src import models, crud

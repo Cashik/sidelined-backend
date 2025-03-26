@@ -3,7 +3,7 @@ import logging
 import uuid
 import time
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlalchemy.orm import Session
 
 from src import crud, schemas
 from src.core.crypto import verify_signature, is_valid_address

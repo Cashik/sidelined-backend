@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
-from sqlmodel import Session, select, delete, or_, and_, func
+from sqlalchemy import select, delete, or_, and_, func, desc
+from sqlalchemy.orm import Session
 import random
-from sqlalchemy import func, desc
 import time
 
 from src import models, schemas, enums, exceptions
@@ -14,9 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 async def get_or_create_user(address: str, chain_id: int, session: Session) -> models.User:
-    user = session.exec(select(models.User).where(models.User.address == address, models.User.chain_id == chain_id)).first()
+    stmt = select(models.User).where(
+        models.User.address == address,
+        models.User.chain_id == chain_id
+    )
+    user = session.execute(stmt).scalar_one_or_none()
+    
     if user:
-            return user
+        return user
     else:
         user = models.User(address=address, chain_id=chain_id)
         session.add(user)
@@ -26,7 +31,8 @@ async def get_or_create_user(address: str, chain_id: int, session: Session) -> m
 
 
 async def get_user_by_id(user_id: int, session: Session) -> Optional[models.User]:
-    return session.exec(select(models.User).where(models.User.id == user_id)).first()
+    stmt = select(models.User).where(models.User.id == user_id)
+    return session.execute(stmt).scalar_one_or_none()
 
 
 async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.ChatSummary]:
@@ -37,22 +43,22 @@ async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.Chat
     - время последнего изменения
     """
     # Получаем чаты пользователя, которые не удалены (visible=True)
-    chats_query = select(models.Chat).where(
+    chats_stmt = select(models.Chat).where(
         models.Chat.user_id == user_id,
         models.Chat.visible == True
     ).order_by(desc(models.Chat.created_at))
     
-    chats = db.exec(chats_query).all()
+    chats = db.execute(chats_stmt).scalars().all()
     
     # Получаем время последнего сообщения для каждого чата
     result = []
     for chat in chats:
         # Находим последнее сообщение для определения времени обновления
-        last_message_query = select(models.Message).where(
+        last_message_stmt = select(models.Message).where(
             models.Message.chat_id == chat.id
         ).order_by(desc(models.Message.created_at)).limit(1)
         
-        last_message = db.exec(last_message_query).first()
+        last_message = db.execute(last_message_stmt).scalar_one_or_none()
         
         # Используем время последнего сообщения или время создания чата, если сообщений нет
         last_updated_at = last_message.created_at if last_message else chat.created_at
@@ -77,10 +83,11 @@ async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Opt
     если чат не найден или не принадлежит пользователю, то ошибка
     """
     # Получаем чат
-    chat = db.exec(select(models.Chat).where(
+    chat_stmt = select(models.Chat).where(
         models.Chat.id == chat_id,
         models.Chat.visible == True
-    )).first()
+    )
+    chat = db.execute(chat_stmt).scalar_one_or_none()
     
     # Проверяем, существует ли чат
     if not chat:
@@ -91,24 +98,24 @@ async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Opt
         raise exceptions.UserNotChatOwnerException()
     
     # Формируем запрос для получения сообщений с учетом nonce
-    messages_query = select(models.Message).where(
+    messages_stmt = select(models.Message).where(
         models.Message.chat_id == chat_id
     )
     
     # Добавляем условия для from_nonce и to_nonce, если они указаны
     if from_nonce is not None:
-        messages_query = messages_query.where(models.Message.nonce >= from_nonce)
+        messages_stmt = messages_stmt.where(models.Message.nonce >= from_nonce)
     
     if to_nonce is not None:
-        messages_query = messages_query.where(models.Message.nonce <= to_nonce)
+        messages_stmt = messages_stmt.where(models.Message.nonce <= to_nonce)
     
     # Сортируем сообщения по nonce и selected_at
-    messages_query = messages_query.order_by(
+    messages_stmt = messages_stmt.order_by(
         models.Message.nonce, 
         desc(models.Message.selected_at)
     )
     
-    messages = db.exec(messages_query).all()
+    messages = db.execute(messages_stmt).scalars().all()
     
     # Группируем сообщения по nonce, отбирая последнее выбранное для каждого nonce
     messages_dict: Dict[int, List[schemas.Message]] = {}
@@ -166,10 +173,11 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
         chat_id = new_chat.id
     else:
         # Проверяем существование чата и права доступа
-        chat = db.exec(select(models.Chat).where(
+        chat_stmt = select(models.Chat).where(
             models.Chat.id == chat_id,
             models.Chat.visible == True
-        )).first()
+        )
+        chat = db.execute(chat_stmt).scalar_one_or_none()
         
         if not chat:
             raise exceptions.ChatNotFoundException()
@@ -178,19 +186,21 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
             raise exceptions.UserNotChatOwnerException()
     
     # Проверяем, если nonce уже существует и это сообщение ассистента
-    existing_message = db.exec(select(models.Message).where(
+    existing_message_stmt = select(models.Message).where(
         models.Message.chat_id == chat_id,
         models.Message.nonce == message.nonce
-    )).first()
+    )
+    existing_message = db.execute(existing_message_stmt).scalar_one_or_none()
     
     if existing_message and existing_message.sender == enums.Role.ASSISTANT and message.sender == enums.Role.USER:
         raise exceptions.InvalidNonceException()
     
     # Удаляем все сообщения с большим nonce
-    db.exec(delete(models.Message).where(
+    delete_stmt = delete(models.Message).where(
         models.Message.chat_id == chat_id,
         models.Message.nonce > message.nonce
-    ))
+    )
+    db.execute(delete_stmt)
     
     # Создаем новое сообщение
     new_message = models.Message(
@@ -198,8 +208,7 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
         content=message.content,
         sender=message.sender,
         recipient=message.recipient,
-        service=enums.Service.OPENAI,  # По умолчанию OpenAI
-        model=message.model,
+        model=message.model.value,
         nonce=message.nonce,
         created_at=message.created_at,
         selected_at=message.selected_at
@@ -218,10 +227,11 @@ async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     если чат не найден или не принадлежит пользователю, то ошибка
     """
     # Получаем чат
-    chat = db.exec(select(models.Chat).where(
+    chat_stmt = select(models.Chat).where(
         models.Chat.id == chat_id,
         models.Chat.visible == True
-    )).first()
+    )
+    chat = db.execute(chat_stmt).scalar_one_or_none()
     
     # Проверяем, существует ли чат
     if not chat:

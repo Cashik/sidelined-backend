@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, ClassVar
-from sqlmodel import Field, SQLModel, Enum, Relationship
-
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum
+from sqlalchemy.orm import relationship, declarative_base
 import time
 
 from src import enums, schemas
+
+Base = declarative_base()
 
 # todo: файлы к сообщениям
 
@@ -18,42 +20,44 @@ def past_timestamp(hours=50):
     return int(time.time() - hours * 3600)
 
 
-class User(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    address: str
-    chain_id: int
-    created_at: int = Field(default_factory=now_timestamp)
-    
-    # Relationships
-    chats: List["Chat"] = Relationship(back_populates="user")
+class User(Base):
+    __tablename__ = "user"
 
-class Chat(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id")
-    created_at: int = Field(default_factory=now_timestamp)
-    title: str
-    visible: bool = Field(default=True)
+    id = Column(Integer, primary_key=True, index=True)
+    address = Column(String)
+    chain_id = Column(Integer)
+    created_at = Column(Integer, default=now_timestamp)
     
     # Relationships
-    user: User = Relationship(back_populates="chats")
-    messages: List["Message"] = Relationship(back_populates="chat")
-    
-class Message(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    chat_id: int = Field(foreign_key="chat.id")
-    content: str
-    # поля для определения роли и получателей сообщения
-    sender: enums.Role = Field(sa_column=Enum(enums.Role))
-    recipient: enums.Role = Field(sa_column=Enum(enums.Role))
-    # источник генерации (последний выбранный)
-    service: enums.Service = Field(sa_column=Enum(enums.Service))
-    model: enums.Model = Field(sa_column=Enum(enums.Model))
-    # поля для определения порядка сообщений
-    nonce: int # порядковый номер сообщения в чате
-    created_at: int = Field(default_factory=now_timestamp)
-    selected_at: int = Field(default_factory=now_timestamp) # для выбора одного из нескольких вариантов с одинаковым порядковым номером
+    chats = relationship("Chat", back_populates="user")
+
+class Chat(Base):
+    __tablename__ = "chat"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id"))
+    created_at = Column(Integer, default=now_timestamp)
+    title = Column(String)
+    visible = Column(Boolean, default=True)
     
     # Relationships
-    chat: Chat = Relationship(back_populates="messages")
+    user = relationship("User", back_populates="chats")
+    messages = relationship("Message", back_populates="chat")
+    
+class Message(Base):
+    __tablename__ = "message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(Integer, ForeignKey("chat.id"))
+    content = Column(String)
+    sender = Column(SQLEnum(enums.Role))
+    recipient = Column(SQLEnum(enums.Role))
+    model = Column(String)
+    nonce = Column(Integer)
+    created_at = Column(Integer, default=now_timestamp)
+    selected_at = Column(Integer, default=now_timestamp)
+    
+    # Relationships
+    chat = relationship("Chat", back_populates="messages")
     
 
