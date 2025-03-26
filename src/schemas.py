@@ -39,6 +39,12 @@ class LoginResponse(BaseModel):
 class IsLoginResponse(BaseModel):
     logged_in: bool
 
+
+# схемы роутера user
+
+
+
+
 # внутренние схемы чата с ИИ
 
 class Message(BaseModel):
@@ -47,8 +53,11 @@ class Message(BaseModel):
     recipient: enums.Role
     model: enums.Model
     nonce: int
+    chat_style: Optional[enums.ChatStyle] = None
+    chat_details_level: Optional[enums.ChatDetailsLevel] = None
     created_at: int
     selected_at: int
+
 
 class MessageCreate(BaseModel):
     chat_id: Optional[int] = None

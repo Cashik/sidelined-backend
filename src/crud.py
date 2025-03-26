@@ -128,6 +128,8 @@ async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Opt
             recipient=message.recipient,
             model=message.model,
             nonce=message.nonce,
+            chat_style=message.chat_style,
+            chat_details_level=message.chat_details_level,
             created_at=message.created_at,
             selected_at=message.selected_at
         )
@@ -208,8 +210,10 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
         content=message.content,
         sender=message.sender,
         recipient=message.recipient,
-        model=message.model.value,
+        model=message.model,
         nonce=message.nonce,
+        chat_style=message.chat_style,
+        chat_details_level=message.chat_details_level,
         created_at=message.created_at,
         selected_at=message.selected_at
     )
