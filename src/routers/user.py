@@ -33,13 +33,13 @@ class ChatSettingsUpdateRequest(UserChatSettings):
     pass
 
 class AvailableSettingsResponse(BaseModel):
-    chat_models: List[enums.ChatModel]
+    chat_models: List[enums.Model]
     chat_styles: List[enums.ChatStyle]
     chat_details_levels: List[enums.ChatDetailsLevel]
 
 @router.get("/me", response_model=User)
 async def get_user(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    user_data: models.User = await crud.get_user(user.id, db)
+    user_data: models.User = await crud.get_user_by_id(user.id, db)
     return User(
         address=user_data.address,
         chain_id=user_data.chain_id,
@@ -57,7 +57,7 @@ async def get_user(user: models.User = Depends(get_current_user), db: Session = 
 @router.get("/settings/chat", response_model=AvailableSettingsResponse)
 async def get_available_settings():
     return AvailableSettingsResponse(
-        chat_models=list(enums.ChatModel),
+        chat_models=list(enums.Model),
         chat_styles=list(enums.ChatStyle),
         chat_details_levels=list(enums.ChatDetailsLevel)
     )
