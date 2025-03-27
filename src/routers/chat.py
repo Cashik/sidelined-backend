@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from src import schemas, enums, models, crud, utils
-from src.core.middleware import get_current_user
+from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
+from src.config import settings
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -59,7 +60,12 @@ async def get_chat(id: int, user: models.User = Depends(get_current_user), db: S
     return ChatResponse(chat=chat)
 
 @router.post("/message", response_model=CreateMessageResponse)
-async def create_message(create_message_request: schemas.MessageCreate, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def create_message(
+    create_message_request: schemas.MessageCreate,
+    user: models.User = Depends(get_current_user),
+    available_balance: bool = Depends(check_balance_and_update_token),
+    db: Session = Depends(get_session),
+):
     # добавляем сообщение пользователя в чат
     # если nonce не указан, то добавляем в конец чата
     # !если nonce указан, то последующие сообщения удаляются
@@ -83,7 +89,12 @@ async def create_message(create_message_request: schemas.MessageCreate, user: mo
     return CreateMessageResponse(chat=chat, answer_message=answer_message)
 
 @router.post("/message/regenerate", response_model=CreateMessageResponse)
-async def regenerate_message(request: RegenerateMessageRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def regenerate_message(
+    request: RegenerateMessageRequest,
+    user: models.User = Depends(get_current_user),
+    available_balance: bool = Depends(check_balance_and_update_token),
+    db: Session = Depends(get_session),
+):
     # получаем все сообщения до запрошенного
     chat: schemas.Chat = await crud.get_user_chat(db, request.chat_id, user.id, to_nonce=request.nonce-1)
     # генерируем новое сообщение от ИИ

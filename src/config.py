@@ -1,17 +1,23 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
-from pydantic import ConfigDict
+from pydantic import ConfigDict, validator
+from src import enums, schemas
 
-"""
-Help: any settings can be set in environment variables through .env file with same name as in class
+requirements = [
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0x67543CF0304C19CA62AC95ba82FD4F4B40788dc1",
+            interface=enums.TokenInterface.ERC20,
+            decimals=8,
+            symbol="RIZ",
+            name="Rivals Network"
+        ),
+        balance=1000
+    ),
+]
 
-Example:
-HOST=0.0.0.0
-PORT=8000
-DEBUG=True
-etc...
-"""
 
 class Settings(BaseSettings):
     # Server settings
@@ -45,7 +51,26 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o-mini"
     MAX_DAILY_MESSAGES: int = 10
-    DEFAULT_CHAT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
+    DEFAULT_CHAT_CONTEXT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
+    
+    # Thirdweb settings
+    THIRDWEB_APP_ID: str
+    THIRDWEB_PRIVATE_KEY: str
+    ALLOW_CHAT_WHEN_SERVER_IS_DOWN: bool = False
+    
+    # Token requirements
+    TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = requirements
+    BALANCE_CHECK_LIFETIME_SECONDS: int = 60 # default 4 hours
+    
+    @validator('TOKEN_REQUIREMENTS')
+    def validate_token_requirements(cls, v):
+        for req in v:
+            if req.token.interface != enums.TokenInterface.ERC20:
+                raise NotImplementedError(
+                    f"Currently only ERC20 tokens are supported. "
+                    f"Found {req.token.interface.value} interface in configuration."
+                )
+        return v
     
     @property
     def DATABASE_URL(self) -> str:

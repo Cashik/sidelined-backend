@@ -5,7 +5,7 @@ import time
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from src import crud, schemas
+from src import crud, schemas, utils
 from src.core.crypto import verify_signature, is_valid_address
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
@@ -22,7 +22,6 @@ LOGIN_STATEMENT = "Войдите в приложение Sidelined AI испо�
 DOMAIN = "localhost:8000"
 
 
-
 @router.post("/login", response_model=schemas.LoginResponse)
 async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
     logger.info(f"Login data received: {request}")
@@ -33,8 +32,21 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
         raise HTTPException(status_code=401, detail="Invalid address")
     
     user = await crud.get_or_create_user(request.payload.address, request.payload.chain_id, db)
-    token = create_token({"user_id": user.id})
-    return schemas.LoginResponse(access_token=token)
+    
+    # Проверяем баланс при логине
+    balance_check_success = await utils.check_user_access(user.address, user.chain_id)
+    
+    # Создаем payload для токена
+    token_payload = schemas.TokenPayload(
+        user_id=user.id,
+        address=user.address,
+        chain_id=user.chain_id,
+        balance_check_time=int(time.time()),
+        balance_check_success=balance_check_success
+    )
+    
+    token = create_token(token_payload)
+    return schemas.LoginResponse(access_token=token, chat_available=balance_check_success)
 
 @router.post("/logout")
 async def do_logout():

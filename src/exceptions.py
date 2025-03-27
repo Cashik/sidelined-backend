@@ -23,3 +23,11 @@ class InvalidNonceException(HTTPException):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Нельзя изменить сообщение ассистента"
         )
+
+class ThirdwebServiceException(HTTPException):
+    def __init__(self):
+        super().__init__(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка при получении балансов"
+        )
+

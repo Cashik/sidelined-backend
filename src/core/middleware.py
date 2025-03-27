@@ -1,11 +1,14 @@
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 from typing import Optional
 from sqlalchemy.orm import Session
-from src.core.auth import decode_token
+import time
+
+from src.config import settings
+from src.core.auth import decode_token, create_token
 from src.database import get_session
-from src import models, crud
+from src import models, crud, utils, schemas
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +111,66 @@ async def get_optional_user(
     except Exception as e:
         logger.warning(f"Optional authentication failed: {str(e)}")
         return None
+    
+
+
+
+
+
+async def check_balance_and_update_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    response: Response = None
+) -> bool:
+    """
+    миделвар, который берет кредентиалсы, извлекает из них данные проверки.
+    если 
+    проверка успешная и время ок, то конец
+    если проверка неуспешная или была дольше чем нужно, то запускаем новую
+    если новая провека ок, то добавляем новый токен в хедер и конец
+    иначе вызываем особую ошибку, по которой фронт поймет, что доступа к этому апи нет
+    """
+    exception = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Balance check failed",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    token = credentials.credentials
+    payload = decode_token(token)
+    
+    # проверяем последнюю проверку
+    check_success: bool = payload["balance_check_success"]
+    check_time: int = payload["balance_check_time"]
+    current_time: int = int(time.time())
+    if check_success and (current_time - check_time) < settings.BALANCE_CHECK_LIFETIME_SECONDS:
+        logger.info(f"Balance check successful {payload}")
+        return True
+    
+    # проверка не прошла, значит нужно сделать новую
+    address: str = payload["address"]
+    chain_id: int = payload["chain_id"]
+    try:
+        balance_check_success: bool = await utils.check_user_access(address, chain_id)
+    except Exception as e:
+        logger.error(f"Balance check failed: {str(e)}")
+        if settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN:
+            return True
+        else:
+            raise exception
+            
+    logger.info(f"Balance check fail. New balance check result: {balance_check_success} for user {payload}")
+    if balance_check_success:
+        # создаем новый токен
+        new_token_payload = schemas.TokenPayload(
+            user_id=payload["user_id"],
+            address=address,
+            chain_id=chain_id,
+            balance_check_time=current_time,
+            balance_check_success=balance_check_success
+        )
+        new_token = create_token(new_token_payload)
+        response.headers["X-New-Token"] = new_token
+        return True
+    else:
+        raise exception
+        

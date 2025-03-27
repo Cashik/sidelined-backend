@@ -3,12 +3,13 @@ import time
 from typing import Optional, Dict, Any
 
 from src.config import settings
+from src.schemas import TokenPayload
 
-def create_token(data: Dict[str, Any], expires_delta: Optional[int] = None) -> str:
+def create_token(payload: TokenPayload, expires_delta: Optional[int] = None) -> str:
     """
-    Создает JWT токен для пользователя
+    Создает JWT токен для пользователя с информацией о проверке баланса
     """
-    to_encode = data.copy()
+    to_encode = payload.model_dump()
     jwt_settings = settings.get_jwt_settings()
     current_time = int(time.time())
     expiration_time = current_time + (expires_delta or jwt_settings["access_token_expire_minutes"] * 60)

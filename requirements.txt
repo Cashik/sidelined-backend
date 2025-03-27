@@ -12,3 +12,4 @@ openai
 eth-account
 eth-utils
 alembic-postgresql-enum
+requests

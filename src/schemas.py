@@ -7,7 +7,7 @@ import time
 from src import enums
 
 
-# схемы роутера auth
+# апи-схемы роутера auth
 
 class LoginPayloadRequest(BaseModel):
     address: str
@@ -34,13 +34,14 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    chat_available: bool
 
 
 class IsLoginResponse(BaseModel):
     logged_in: bool
 
 
-# схемы роутера user
+# апи-схемы роутера user
 
 class UserProfile(BaseModel):
     preferred_name: Optional[str] = None
@@ -57,8 +58,32 @@ class User(BaseModel):
     profile: UserProfile
     chat_settings: UserChatSettings
 
+# бизнес-схемы токенов
 
-# внутренние схемы чата с ИИ
+class Token(BaseModel):
+    chain_id: enums.ChainID
+    address: str
+    interface: enums.TokenInterface
+    decimals: int
+    symbol: str
+    name: str
+
+class TokenRequirement(BaseModel):
+    token: Token
+    # ! количество токенов не учитывающее десятичные значения
+    # т.е. если токен имеет 8 десятичных знаков, то для 1 токена значение будет 100000000
+    balance: float
+    
+# схема токена авторизации
+
+class TokenPayload(BaseModel):
+    user_id: int
+    address: str
+    chain_id: int
+    balance_check_time: int  # timestamp последней проверки
+    balance_check_success: bool  # результат проверки
+
+# бизнес-схемы чата
 
 class Message(BaseModel):
     content: str
@@ -71,6 +96,12 @@ class Message(BaseModel):
     created_at: int
     selected_at: int
 
+class Chat(BaseModel):
+    id: int
+    title: str
+    messages: Dict[int, List[Message]] # nonce: [message, message, ...]
+
+# апи-схемы чата с ИИ
 
 class MessageCreate(BaseModel):
     chat_id: Optional[int] = None
@@ -79,19 +110,13 @@ class MessageCreate(BaseModel):
     model: enums.Model
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
-
-class Chat(BaseModel):
-    id: int
-    title: str
-    messages: Dict[int, List[Message]] # nonce: [message, message, ...]
-
+    
 class ChatSummary(BaseModel):
     id: int
     title: str
     last_updated_at: int
     
 
-# схемы роутера chats
 
     
     
