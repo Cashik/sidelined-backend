@@ -1,7 +1,7 @@
 import time
 import json
 from typing import Optional, Dict, List, Any
-
+import logging
 import openai
 from openai import OpenAI
 
@@ -9,12 +9,15 @@ from src import schemas, enums, models, exceptions
 from src.config import settings
 from src.services import thirdweb_service
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
 
 
-async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Message:
+async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> schemas.Message:
     """
     Получение ответа от ИИ на основе контекста чата
     
@@ -32,16 +35,30 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
     messages = []
     
     # Системное сообщение (инструкции для модели)
+    system_message = f"You are a helpful assistant."
+    if generate_data.user.preferred_name:
+        system_message += f"\nUser wants to be called as {generate_data.user.preferred_name}."
+    if generate_data.user.user_context:
+        system_message += f"\nUser context: {generate_data.user.user_context}."
+    if generate_data.chat_settings.chat_style:
+        system_message += f"\nUse this style for your answers: {generate_data.chat_settings.chat_style.value}."
+    if generate_data.chat_settings.chat_details_level:
+        system_message += f"\nUse this details level for your answers: {generate_data.chat_settings.chat_details_level.value}."
+    if generate_data.user.facts:
+        system_message += f"\nWhat you know about user:"
+        for fact in generate_data.user.facts:
+            system_message += f"\n- {fact.description}"
+    logger.info(f"System message: {system_message}")
     messages.append({
         "role": "system",
-        "content": "You are a helpful assistant."
+        "content": system_message
     })
     
     # Добавление сообщений из истории чата
     # Проходим по всем nonce в порядке возрастания
-    for nonce in sorted(chat.messages.keys()):
+    for nonce in sorted(generate_data.chat.messages.keys()):
         # Выбираем сообщение с наибольшим selected_at
-        message = max(chat.messages[nonce], key=lambda x: x.selected_at)
+        message = max(generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
         messages.append({
             "role": message.sender.value,
             "content": message.content
@@ -49,7 +66,7 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
     
     try:
         # Отправка запроса к OpenAI
-        model_name = model.value  # Получаем строковое значение из enum
+        model_name = generate_data.chat_settings.model.value  # Получаем строковое значение из enum
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
@@ -61,7 +78,7 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
         content = response.choices[0].message.content
         
         # Определение нового nonce (следующий после последнего в чате)
-        last_nonce = max(chat.messages.keys()) if chat.messages else -1
+        last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
         new_nonce = last_nonce + 1
         
         # Создание объекта сообщения
@@ -69,7 +86,7 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
             content=content,
             sender=enums.Role.ASSISTANT,
             recipient=enums.Role.USER,
-            model=model,
+            model=generate_data.chat_settings.model,
             nonce=new_nonce,
             created_at=now_timestamp(),
             selected_at=now_timestamp()
@@ -85,7 +102,7 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
             error_message = "Error while generating answer. Please try again later."
         
         # Определение нового nonce
-        last_nonce = max(chat.messages.keys()) if chat.messages else -1
+        last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
         new_nonce = last_nonce + 1
         
         # Создание объекта сообщения с ошибкой
@@ -93,7 +110,7 @@ async def get_ai_answer(chat: schemas.Chat, model: enums.Model) -> schemas.Messa
             content=error_message,
             sender=enums.Role.SYSTEM,
             recipient=enums.Role.USER,
-            model=model,
+            model=generate_data.chat_settings.model,
             nonce=new_nonce,
             created_at=now_timestamp(),
             selected_at=now_timestamp()

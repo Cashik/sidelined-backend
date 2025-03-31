@@ -52,11 +52,15 @@ class UserChatSettings(BaseModel):
     preferred_chat_style: Optional[enums.ChatStyle] = None
     preferred_chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
+
+
 class User(BaseModel):
     address: str
     chain_id: int
     profile: UserProfile
     chat_settings: UserChatSettings
+
+
 
 # бизнес-схемы токенов
 
@@ -116,7 +120,25 @@ class ChatSummary(BaseModel):
     title: str
     last_updated_at: int
     
+# бизнес-схемы генерации сообщений
 
+class GenerateMessageSettings(BaseModel):
+    model: enums.Model
+    chat_style: Optional[enums.ChatStyle] = None
+    chat_details_level: Optional[enums.ChatDetailsLevel] = None
+    
+class FactAboutUser(BaseModel):
+    description: str
+
+class UserProfileData(BaseModel):
+    preferred_name: Optional[str] = None
+    user_context: Optional[str] = None
+    facts: List[FactAboutUser]
+    
+class AssistantGenerateData(BaseModel):
+    user: UserProfileData
+    chat: Chat
+    chat_settings: GenerateMessageSettings
 
     
     
