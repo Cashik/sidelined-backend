@@ -99,10 +99,11 @@ async def create_message(
         chat=chat,
         chat_settings=chat_settings,
     )
-    answer_message: schemas.Message = await utils.get_ai_answer(assistant_generate_data)
-    # добавляем ответ в чат
-    chat: schemas.Chat = await crud.add_message(db, chat.id, answer_message, user.id)
-    return CreateMessageResponse(chat=chat, answer_message=answer_message)
+    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data)
+    # добавляем новые сообщения в чат
+    for message in answer_messages:
+        chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)
+    return CreateMessageResponse(chat=chat, answer_message=answer_messages[0])
 
 @router.post("/message/regenerate", response_model=CreateMessageResponse)
 async def regenerate_message(
@@ -129,10 +130,11 @@ async def regenerate_message(
         chat=chat,
         chat_settings=chat_settings,
     )
-    answer_message: schemas.Message = await utils.get_ai_answer(assistant_generate_data)
-    # добавляем новое сообщение в чат
-    chat: schemas.Chat = await crud.add_message(db, chat.id, answer_message, user.id)
-    return CreateMessageResponse(chat=chat, answer_message=answer_message)
+    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data)
+    # добавляем новые сообщения в чат
+    for message in answer_messages:
+        chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)
+    return CreateMessageResponse(chat=chat, answer_message=answer_messages[0])
 
 @router.post("/delete", response_model=DeleteResponse)
 async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):

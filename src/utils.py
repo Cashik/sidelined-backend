@@ -1,3 +1,4 @@
+import re
 import time
 import json
 from typing import Optional, Dict, List, Any
@@ -12,12 +13,82 @@ from src.services import thirdweb_service
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
+EXEC_COMMAND = "call"
+
+AGENT_FUNCTIONS_TEMPLATE = f"""
+You have access to some functions. Call them at the end of your answer to the user's message using the format specified for each function. You can call several functions at once if necessary.
+Your answer should be formatted as follows:
+```
+Some answer.
+{EXEC_COMMAND} function_name(args)
+{EXEC_COMMAND} function_name(args)
+```
+
+Example:
+```
+Yes, cats are really cute but i think you love dogs too.
+call add_facts(["love cats", "don't love dogs"])
+call del_facts(["love dogs"])
+```
+
+List of functions:
+
+1. Editing important facts about the user.  
+Keep the knowledge base about the user up-to-date. Add important and current context and remove unnecessary or incorrect information.
+
+{EXEC_COMMAND} add_facts(list[str])  
+{EXEC_COMMAND} del_facts(list[str])
+
+Usage examples:  
+{EXEC_COMMAND} add_facts(["fact1", "some important fact 2"])  
+{EXEC_COMMAND} del_facts(["some important fact 2"])
+
+2. Interaction of the user with the blockchain.  
+Nebula is an AI agent with access to blockchain data. You can interact with it to supplement the answer to the user.
+
+2.1 Data retrieval.  
+If the user asks a question related to obtaining blockchain data, simply forward this message to your colleague. Keep in mind that Nebula does not understand the context of your conversation with the user, so if necessary, you must modify the user's request.
+
+{EXEC_COMMAND} nebula_ask(str)
+
+2.2 Creating a transaction.  
+Nebula can create a transaction for the user, which they will only need to sign. As with data retrieval, you need to ensure that Nebula has all the necessary context.
+
+{EXEC_COMMAND} nebula_sign(str)
+
+Usage examples:  
+{EXEC_COMMAND} nebula_ask("native or simplified user request")
+{EXEC_COMMAND} nebula_sign("native or supplemented user request")
+"""
+
+
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
 
+def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCallingResult:
+    """Обработка команд в тексте"""
+    logger.info(f"Raw message: {raw_message}")
+    # Найти все команды в тексте
+    commands = re.findall(r'call\s+(\w+)\((.*?)\)', raw_message)
+    messages = []
+    for command in commands:
+        messages.append(schemas.SystemMessage(
+            message=f"dev: agent called function {command[0]} with arguments {command[1]}"
+        ))
+    
+    # Удаляем команды вместе с переносами строк
+    edited_raw_message = re.sub(r'\n\s*call\s+(\w+)\((.*?)\)', '', raw_message)
+    
+    return schemas.AgentFunctionCallingResult(
+        success=True,
+        new_messages=messages,
+        edited_raw_message=edited_raw_message
+    )
 
-async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> schemas.Message:
+
+async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[schemas.Message]:
     """
     Получение ответа от ИИ на основе контекста чата
     
@@ -48,6 +119,9 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> schemas
         system_message += f"\nWhat you know about user:"
         for fact in generate_data.user.facts:
             system_message += f"\n- {fact.description}"
+    
+    system_message += f"\n{AGENT_FUNCTIONS_TEMPLATE}\n"
+    
     logger.info(f"System message: {system_message}")
     messages.append({
         "role": "system",
@@ -81,18 +155,35 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> schemas
         last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
         new_nonce = last_nonce + 1
         
+        # Обработка команд в тексте
+        agent_function_calling_result = handle_agent_functions(content)
+        
         # Создание объекта сообщения
-        answer_message = schemas.Message(
-            content=content,
+        result_messages = []
+        # Добавляем новые сообщение от агента
+        result_messages.append(schemas.Message(
+            content=agent_function_calling_result.edited_raw_message,
             sender=enums.Role.ASSISTANT,
             recipient=enums.Role.USER,
             model=generate_data.chat_settings.model,
             nonce=new_nonce,
             created_at=now_timestamp(),
             selected_at=now_timestamp()
-        )
+        ))
+        # Если есть новые сообщения от системы, добавляем их
+        for message in agent_function_calling_result.new_messages:
+            new_nonce += 1
+            result_messages.append(schemas.Message(
+                content=message.message,
+                sender=enums.Role.SYSTEM,
+                recipient=enums.Role.USER,
+                model=generate_data.chat_settings.model,
+                nonce=new_nonce,
+                created_at=now_timestamp(),
+                selected_at=now_timestamp()
+            ))
         
-        return answer_message
+        return result_messages
         
     except Exception as e:
         # В случае ошибки создаем сообщение с текстом ошибки
@@ -116,7 +207,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> schemas
             selected_at=now_timestamp()
         )
         
-        return answer_message
+        return [answer_message]
 
 
 async def check_user_access(user_address: str, user_chain_id: int) -> bool:

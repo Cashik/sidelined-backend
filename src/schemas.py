@@ -126,7 +126,15 @@ class GenerateMessageSettings(BaseModel):
     model: enums.Model
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
-    
+
+class SystemMessage(BaseModel):
+    message: str
+
+class AgentFunctionCallingResult(BaseModel):
+    success: bool
+    new_messages: List[SystemMessage]
+    edited_raw_message: str
+
 class FactAboutUser(BaseModel):
     description: str
 
