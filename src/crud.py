@@ -191,18 +191,19 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
     existing_message_stmt = select(models.Message).where(
         models.Message.chat_id == chat_id,
         models.Message.nonce == message.nonce
-    )
+    ).order_by(desc(models.Message.selected_at)).limit(1)
     existing_message = db.execute(existing_message_stmt).scalar_one_or_none()
     
     if existing_message and existing_message.sender == enums.Role.ASSISTANT and message.sender == enums.Role.USER:
         raise exceptions.InvalidNonceException()
     
-    # Удаляем все сообщения с большим nonce
-    delete_stmt = delete(models.Message).where(
-        models.Message.chat_id == chat_id,
-        models.Message.nonce > message.nonce
-    )
-    db.execute(delete_stmt)
+    # Удаляем все сообщения с большим nonce, но только если регенерируем сообщениие от юзера
+    if existing_message and existing_message.sender == enums.Role.USER:
+        delete_stmt = delete(models.Message).where(
+            models.Message.chat_id == chat_id,
+            models.Message.nonce > message.nonce
+        )
+        db.execute(delete_stmt)
     
     # Создаем новое сообщение
     new_message = models.Message(
