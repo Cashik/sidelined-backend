@@ -304,4 +304,58 @@ async def update_user_profile(
     session.refresh(user)
     return user
 
+async def add_user_facts(
+    user_id: int,
+    facts: List[str],
+    session: Session
+) -> models.User:
+    """
+    Добавление новых фактов о пользователе разом
+    """
+    user = await get_user_by_id(user_id, session)
+    if not user:
+        raise exceptions.UserNotFoundException()
+    
+    # Создаем новые факты
+    new_facts = [models.UserFact(
+        user_id=user_id,
+        description=fact
+    ) for fact in facts]
+
+    session.add_all(new_facts)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+async def delete_user_facts(
+    user_id: int,
+    fact_ids: List[int],
+    session: Session
+) -> models.User:
+    """
+    Удаление фактов о пользователе
+    """
+    user = await get_user_by_id(user_id, session)
+    if not user:
+        raise exceptions.UserNotFoundException()
+
+    # Удаляем факты
+    for fact_id in fact_ids:
+        # Проверяем, принадлежит ли факт пользователю
+        fact_stmt = select(models.UserFact).where(
+            models.UserFact.id == fact_id,
+            models.UserFact.user_id == user_id
+        )
+        fact = session.execute(fact_stmt).scalar_one_or_none()
+        
+        if not fact:
+            raise exceptions.FactNotFoundException()
+        
+        # Удаляем факт
+        session.delete(fact)
+
+    session.commit()
+    session.refresh(user)
+    return user
 

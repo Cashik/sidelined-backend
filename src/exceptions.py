@@ -31,3 +31,7 @@ class ThirdwebServiceException(HTTPException):
             detail="Ошибка при получении балансов"
         )
 
+class FactNotFoundException(Exception):
+    """Исключение, возникающее когда факт не найден"""
+    pass
+

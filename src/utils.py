@@ -5,8 +5,9 @@ from typing import Optional, Dict, List, Any
 import logging
 import openai
 from openai import OpenAI
+from sqlalchemy.orm import Session
 
-from src import schemas, enums, models, exceptions
+from src import schemas, enums, models, exceptions, crud
 from src.config import settings
 from src.services import thirdweb_service
 
@@ -17,7 +18,7 @@ logger.setLevel(logging.INFO)
 EXEC_COMMAND = "call"
 
 COMMON_FUNCTIONS_TEMPLATE = f"""
-You have access to some functions. Call them at the end of your answer to the user's message using the format specified for each function. You can call several functions at once if necessary.
+#You have access to some functions. Call them at the end of your answer to the user's message using the format specified for each function. You can call several functions at once if necessary.
 Your answer should be formatted as follows:
 
 [Answer with some functions calling template]
@@ -34,19 +35,23 @@ call del_facts(["love dogs"])
 
 
 List of functions:
-
 """
 
 FACTS_FUNCTIONS_TEMPLATE = f"""
-Editing important facts about the user.  
-Keep the knowledge base about the user up-to-date. Add important and current context and remove unnecessary or incorrect information.
+##Edit user facts.
+Keep the knowledge base about the user up-to-date. Do not mention user that you are editing their facts.
 
-{EXEC_COMMAND} add_facts(list[str])  
-{EXEC_COMMAND} del_facts(list[str])
-
-Usage examples:  
+###Add new (one or several) facts. Add only important facts and only from the user's messages. Facts should be short and concise. Do not repeat the same facts.
+{EXEC_COMMAND} add_facts(new_facts:list[str])
+Example:
 {EXEC_COMMAND} add_facts(["fact1", "some important fact 2"])  
-{EXEC_COMMAND} del_facts(["some important fact 2"])
+
+###Remove unactual or incorrect facts with the specified id.
+{EXEC_COMMAND} del_facts(id:list[int])
+Example:
+{EXEC_COMMAND} del_facts([3])
+
+### Current list of facts about the user (id - fact). You can edit only this list:
 """
 
 NEBULA_FUNCTIONS_TEMPLATE = f"""
@@ -73,7 +78,7 @@ def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
 
-async def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCallingResult:
+async def handle_agent_functions(raw_message: str, user_id: int, db: Session) -> schemas.AgentFunctionCallingResult:
     """Обработка команд в тексте"""
     logger.info(f"Raw message: {raw_message}")
     # Найти все команды в тексте
@@ -90,7 +95,7 @@ async def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCalli
         function_name = command[0]
         args = command[1]
         
-        if function_name == "nebula_ask":
+        if function_name == "nebula_ask" and settings.NEBULA_FUNCTIONALITY_ENABLED:
             try:
                 # Извлекаем строку из аргументов
                 message = args.strip('"').strip("'")
@@ -102,9 +107,27 @@ async def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCalli
                     message=f"Nebula:\n {response.message}"
                 ))
             except Exception as e:
-                logger.error(f"Error calling nebula_ask: {e}")
+                logger.error(f"Error asking Nebula: {e}")
                 messages.append(schemas.SystemMessage(
-                    message=f"Error calling nebula_ask: {str(e)}"
+                    message=f"Error asking Nebula: {str(e)}"
+                ))
+        elif function_name == "add_facts" and settings.FACTS_FUNCTIONALITY_ENABLED:
+            try:
+                facts: list[str] = json.loads(args)
+                await crud.add_user_facts(user_id, facts, db)
+            except Exception as e:
+                logger.error(f"Error adding facts: {e}")
+                messages.append(schemas.SystemMessage(
+                    message=f"Error adding facts: {str(e)}"
+                ))
+        elif function_name == "del_facts" and settings.FACTS_FUNCTIONALITY_ENABLED:
+            try:
+                ids: list[int] = json.loads(args)
+                await crud.delete_user_facts(user_id, ids, db)
+            except Exception as e:
+                logger.error(f"Error removing facts: {e}")
+                messages.append(schemas.SystemMessage(
+                    message=f"Error removing facts: {str(e)}"
                 ))
         else:
             messages.append(schemas.SystemMessage(
@@ -121,7 +144,7 @@ async def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCalli
     )
 
 
-async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[schemas.Message]:
+async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.Message]:
     """
     Получение ответа от ИИ на основе контекста чата
     
@@ -141,24 +164,25 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[sc
     # Системное сообщение (инструкции для модели)
     system_message = f"You are a helpful assistant."
     if generate_data.user.preferred_name:
-        system_message += f"\nUser wants to be called as {generate_data.user.preferred_name}."
+        system_message += f"""\nUser wants to be called as "{generate_data.user.preferred_name}"."""
     if generate_data.user.user_context:
-        system_message += f"\nUser context: {generate_data.user.user_context}."
+        system_message += f"\nUser describe himself as: \n{generate_data.user.user_context}."
     if generate_data.chat_settings.chat_style:
-        system_message += f"\nUse this style for your answers: {generate_data.chat_settings.chat_style.value}."
+        system_message += f"\nUse the following communication style: {generate_data.chat_settings.chat_style.value}."
     if generate_data.chat_settings.chat_details_level:
-        system_message += f"\nUse this details level for your answers: {generate_data.chat_settings.chat_details_level.value}."
-    if generate_data.user.facts:
-        system_message += f"\nWhat you know about user:"
-        for fact in generate_data.user.facts:
-            system_message += f"\n- {fact.description}"
+        system_message += f"\nUse the following details level for your answer messages: {generate_data.chat_settings.chat_details_level.value}."
     
     if settings.FUNCTIONALITY_ENABLED:
-        system_message += f"\n{COMMON_FUNCTIONS_TEMPLATE}\n"
+        system_message += f"\n{COMMON_FUNCTIONS_TEMPLATE}"
         if settings.FACTS_FUNCTIONALITY_ENABLED:
-            system_message += f"\n{FACTS_FUNCTIONS_TEMPLATE}\n"
+            system_message += f"\n{FACTS_FUNCTIONS_TEMPLATE}"
+            if generate_data.user.facts:
+                for fact in generate_data.user.facts:
+                    system_message += f"\n{fact.id} - {fact.description}"
+            else:
+                system_message += f"\nList is empty."
         if settings.NEBULA_FUNCTIONALITY_ENABLED:
-            system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}\n"
+            system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}"
     
     logger.info(f"System message: {system_message}")
     messages.append({
@@ -175,6 +199,10 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[sc
             "role": message.sender.value,
             "content": message.content
         })
+    messages.append({
+        "role": "system",
+        "content": "!Do not forget about your starting instructions before answering the user's last message!"
+    })
     
     try:
         # Отправка запроса к OpenAI
@@ -195,7 +223,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[sc
         
         if settings.FUNCTIONALITY_ENABLED:
             # Обработка команд в тексте
-            agent_function_calling_result = await handle_agent_functions(content)
+            agent_function_calling_result = await handle_agent_functions(content, user_id, db)
         
         # Создание объекта сообщения
         result_messages = []

@@ -38,6 +38,19 @@ class User(Base):
     
     # Relationships
     chats = relationship("Chat", back_populates="user")
+    facts = relationship("UserFact", back_populates="user")
+
+class UserFact(Base):
+    __tablename__ = "user_fact"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id"))
+    description = Column(String(200))
+    created_at = Column(Integer, default=now_timestamp)
+    
+    # Relationships
+    user = relationship("User", back_populates="facts")
+    
 
 class Chat(Base):
     __tablename__ = "chat"

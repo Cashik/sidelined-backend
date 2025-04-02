@@ -88,18 +88,22 @@ async def create_message(
         chat_style=create_message_request.chat_style,
         chat_details_level=create_message_request.chat_details_level,
     )
-    # TODO: добавить факты о пользователе
+    user_facts = [schemas.FactAboutUser(
+        id=fact.id,
+        description=fact.description,
+        created_at=fact.created_at,
+    ) for fact in user.facts]
     user_profile_data = schemas.UserProfileData(
         preferred_name=user.preferred_name,
         user_context=user.user_context,
-        facts=[],
+        facts=user_facts,
     )
     assistant_generate_data = schemas.AssistantGenerateData(
         user=user_profile_data,
         chat=chat,
         chat_settings=chat_settings,
     )
-    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data)
+    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data, user.id, db)
     # добавляем новые сообщения в чат
     for message in answer_messages:
         chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)
@@ -115,10 +119,15 @@ async def regenerate_message(
     # получаем все сообщения до запрошенного
     chat: schemas.Chat = await crud.get_user_chat(db, request.chat_id, user.id, to_nonce=request.nonce-1)
     # генерируем новое сообщение от ИИ
+    user_facts = [schemas.FactAboutUser(
+        id=fact.id,
+        description=fact.description,
+        created_at=fact.created_at,
+    ) for fact in user.facts]
     user_profile_data = schemas.UserProfileData(
         preferred_name=user.preferred_name,
         user_context=user.user_context,
-        facts=[],
+        facts=user_facts,
     )
     chat_settings = schemas.GenerateMessageSettings(
         model=request.model,
@@ -130,7 +139,7 @@ async def regenerate_message(
         chat=chat,
         chat_settings=chat_settings,
     )
-    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data)
+    answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data, user.id, db)
     # добавляем новые сообщения в чат
     for message in answer_messages:
         chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)

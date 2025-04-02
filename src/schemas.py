@@ -43,23 +43,26 @@ class IsLoginResponse(BaseModel):
 
 # апи-схемы роутера user
 
+class UserFact(BaseModel):
+    id: int
+    description: str
+    created_at: int
+
 class UserProfile(BaseModel):
     preferred_name: Optional[str] = None
     user_context: Optional[str] = None
+    facts: List[UserFact]
 
 class UserChatSettings(BaseModel):
     preferred_chat_model: Optional[enums.Model] = None
     preferred_chat_style: Optional[enums.ChatStyle] = None
     preferred_chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
-
-
 class User(BaseModel):
     address: str
     chain_id: int
     profile: UserProfile
     chat_settings: UserChatSettings
-
 
 
 # бизнес-схемы токенов
@@ -136,7 +139,9 @@ class AgentFunctionCallingResult(BaseModel):
     edited_raw_message: str
 
 class FactAboutUser(BaseModel):
+    id: int
     description: str
+    created_at: int
 
 class UserProfileData(BaseModel):
     preferred_name: Optional[str] = None
