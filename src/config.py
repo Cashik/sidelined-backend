@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # JWT settings
     JWT_SECRET_KEY: str = "your-secret-key"  # Default use main SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # Default 30 minutes
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60*24  # Default 24 hours
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # For future implementation refresh tokens
     
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     THIRDWEB_APP_ID: str
     THIRDWEB_PRIVATE_KEY: str
     ALLOW_CHAT_WHEN_SERVER_IS_DOWN: bool = False
+    
+    NEBULA_FUNCTIONALITY_ENABLED: bool = False
+    FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Token requirements
     TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = requirements
@@ -85,6 +88,10 @@ class Settings(BaseSettings):
     @property
     def ALLOWED_ORIGINS(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def FUNCTIONALITY_ENABLED(self) -> bool:
+        return self.NEBULA_FUNCTIONALITY_ENABLED or self.FACTS_FUNCTIONALITY_ENABLED
 
     model_config = ConfigDict(
         extra="allow",  # Allow additional fields

@@ -16,25 +16,29 @@ logger.setLevel(logging.INFO)
 
 EXEC_COMMAND = "call"
 
-AGENT_FUNCTIONS_TEMPLATE = f"""
+COMMON_FUNCTIONS_TEMPLATE = f"""
 You have access to some functions. Call them at the end of your answer to the user's message using the format specified for each function. You can call several functions at once if necessary.
 Your answer should be formatted as follows:
-```
-Some answer.
-{EXEC_COMMAND} function_name(args)
-{EXEC_COMMAND} function_name(args)
-```
 
-Example:
-```
+[Answer with some functions calling template]
+Your answer.
+{EXEC_COMMAND} function_name(args)
+{EXEC_COMMAND} function_name(args)
+[End of template]
+
+[Example of your answer]
 Yes, cats are really cute but i think you love dogs too.
 call add_facts(["love cats", "don't love dogs"])
 call del_facts(["love dogs"])
-```
+[End of example]
+
 
 List of functions:
 
-1. Editing important facts about the user.  
+"""
+
+FACTS_FUNCTIONS_TEMPLATE = f"""
+Editing important facts about the user.  
 Keep the knowledge base about the user up-to-date. Add important and current context and remove unnecessary or incorrect information.
 
 {EXEC_COMMAND} add_facts(list[str])  
@@ -43,7 +47,9 @@ Keep the knowledge base about the user up-to-date. Add important and current con
 Usage examples:  
 {EXEC_COMMAND} add_facts(["fact1", "some important fact 2"])  
 {EXEC_COMMAND} del_facts(["some important fact 2"])
+"""
 
+NEBULA_FUNCTIONS_TEMPLATE = f"""
 2. Interaction of the user with the blockchain.  
 Nebula is an AI agent with access to blockchain data. You can interact with it to supplement the answer to the user.
 
@@ -67,16 +73,43 @@ def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
 
-def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCallingResult:
+async def handle_agent_functions(raw_message: str) -> schemas.AgentFunctionCallingResult:
     """Обработка команд в тексте"""
     logger.info(f"Raw message: {raw_message}")
     # Найти все команды в тексте
     commands = re.findall(r'call\s+(\w+)\((.*?)\)', raw_message)
     messages = []
+    
+    # Инициализация сервиса Thirdweb
+    thirdweb = thirdweb_service.ThirdwebService(
+        app_id=settings.THIRDWEB_APP_ID,
+        private_key=settings.THIRDWEB_PRIVATE_KEY
+    )
+    
     for command in commands:
-        messages.append(schemas.SystemMessage(
-            message=f"dev: agent called function {command[0]} with arguments {command[1]}"
-        ))
+        function_name = command[0]
+        args = command[1]
+        
+        if function_name == "nebula_ask":
+            try:
+                # Извлекаем строку из аргументов
+                message = args.strip('"').strip("'")
+                # Создаем запрос к Nebula
+                request = thirdweb_service.NebulaChatRequest(message=message)
+                # Получаем ответ
+                response = await thirdweb.nebula_chat(request)
+                messages.append(schemas.SystemMessage(
+                    message=f"Nebula:\n {response.message}"
+                ))
+            except Exception as e:
+                logger.error(f"Error calling nebula_ask: {e}")
+                messages.append(schemas.SystemMessage(
+                    message=f"Error calling nebula_ask: {str(e)}"
+                ))
+        else:
+            messages.append(schemas.SystemMessage(
+                message=f"dev: agent called function {function_name} with arguments {args}"
+            ))
     
     # Удаляем команды вместе с переносами строк
     edited_raw_message = re.sub(r'\n\s*call\s+(\w+)\((.*?)\)', '', raw_message)
@@ -120,7 +153,12 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[sc
         for fact in generate_data.user.facts:
             system_message += f"\n- {fact.description}"
     
-    system_message += f"\n{AGENT_FUNCTIONS_TEMPLATE}\n"
+    if settings.FUNCTIONALITY_ENABLED:
+        system_message += f"\n{COMMON_FUNCTIONS_TEMPLATE}\n"
+        if settings.FACTS_FUNCTIONALITY_ENABLED:
+            system_message += f"\n{FACTS_FUNCTIONS_TEMPLATE}\n"
+        if settings.NEBULA_FUNCTIONALITY_ENABLED:
+            system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}\n"
     
     logger.info(f"System message: {system_message}")
     messages.append({
@@ -155,8 +193,9 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData) -> List[sc
         last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
         new_nonce = last_nonce + 1
         
-        # Обработка команд в тексте
-        agent_function_calling_result = handle_agent_functions(content)
+        if settings.FUNCTIONALITY_ENABLED:
+            # Обработка команд в тексте
+            agent_function_calling_result = await handle_agent_functions(content)
         
         # Создание объекта сообщения
         result_messages = []
