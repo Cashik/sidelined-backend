@@ -19,6 +19,9 @@ class Model(Enum):
     GPT_4 = "gpt-4"
     GPT_4O = "gpt-4o"
     GPT_4O_MINI = "gpt-4o-mini"
+    
+    GEMINI_2_FLASH = "gemini-2.0-flash"
+    GEMINI_2_5_PRO = "gemini-2.5-pro-exp-03-25"
 
 
 class ChatStyle(Enum):

@@ -10,73 +10,20 @@ from sqlalchemy.orm import Session
 from src import schemas, enums, models, exceptions, crud
 from src.config import settings
 from src.services import thirdweb_service
+from src.services.prompt_service import PromptService
+from src.providers import openai, gemini
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-EXEC_COMMAND = "call"
 
-COMMON_FUNCTIONS_TEMPLATE = f"""
-#You have access to some functions. Call them at the end of your answer to the user's message using the format specified for each function. You can call several functions at once if necessary.
-Your answer should be formatted as follows:
-
-[Answer with some functions calling template]
-Your answer.
-{EXEC_COMMAND} function_name(args)
-{EXEC_COMMAND} function_name(args)
-[End of template]
-
-[Example of your answer]
-Yes, cats are really cute but i think you love dogs too.
-call add_facts(["love cats", "don't love dogs"])
-call del_facts(["love dogs"])
-[End of example]
-
-
-List of functions:
-"""
-
-FACTS_FUNCTIONS_TEMPLATE = f"""
-##Edit user facts.
-Keep the knowledge base about the user up-to-date. Do not mention user that you are editing their facts.
-
-###Add new (one or several) facts. Add only important facts and only from the user's messages. Facts should be short and concise. Do not repeat the same facts.
-{EXEC_COMMAND} add_facts(new_facts:list[str])
-Example:
-{EXEC_COMMAND} add_facts(["fact1", "some important fact 2"])  
-
-###Remove unactual or incorrect facts with the specified id.
-{EXEC_COMMAND} del_facts(id:list[int])
-Example:
-{EXEC_COMMAND} del_facts([3])
-
-### Current list of facts about the user (id - fact). You can edit only this list:
-"""
-
-NEBULA_FUNCTIONS_TEMPLATE = f"""
-2. Interaction of the user with the blockchain.  
-Nebula is an AI agent with access to blockchain data. You can interact with it to supplement the answer to the user.
-
-2.1 Data retrieval.  
-If the user asks a question related to obtaining blockchain data, simply forward this message to your colleague. Keep in mind that Nebula does not understand the context of your conversation with the user, so if necessary, you must modify the user's request.
-
-{EXEC_COMMAND} nebula_ask(str)
-
-2.2 Creating a transaction.  
-Nebula can create a transaction for the user, which they will only need to sign. As with data retrieval, you need to ensure that Nebula has all the necessary context.
-
-{EXEC_COMMAND} nebula_sign(str)
-
-Usage examples:  
-{EXEC_COMMAND} nebula_ask("native or simplified user request")
-{EXEC_COMMAND} nebula_sign("native or supplemented user request")
-"""
 
 
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
+
 
 async def handle_agent_functions(raw_message: str, user_id: int, db: Session) -> schemas.AgentFunctionCallingResult:
     """Обработка команд в тексте"""
@@ -147,75 +94,21 @@ async def handle_agent_functions(raw_message: str, user_id: int, db: Session) ->
 async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.Message]:
     """
     Получение ответа от ИИ на основе контекста чата
-    
-    Args:
-        chat: Текущий чат со всеми сообщениями
-        model: Модель ИИ для генерации ответа
-    
-    Returns:
-        Сгенерированное сообщение от ИИ
     """
-    # Инициализация клиента OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    
-    # Формирование истории сообщений для запроса к API
-    messages = []
-    
-    # Системное сообщение (инструкции для модели)
-    system_message = f"You are a helpful assistant."
-    if generate_data.user.preferred_name:
-        system_message += f"""\nUser wants to be called as "{generate_data.user.preferred_name}"."""
-    if generate_data.user.user_context:
-        system_message += f"\nUser describe himself as: \n{generate_data.user.user_context}."
-    if generate_data.chat_settings.chat_style:
-        system_message += f"\nUse the following communication style: {generate_data.chat_settings.chat_style.value}."
-    if generate_data.chat_settings.chat_details_level:
-        system_message += f"\nUse the following details level for your answer messages: {generate_data.chat_settings.chat_details_level.value}."
-    
-    if settings.FUNCTIONALITY_ENABLED:
-        system_message += f"\n{COMMON_FUNCTIONS_TEMPLATE}"
-        if settings.FACTS_FUNCTIONALITY_ENABLED:
-            system_message += f"\n{FACTS_FUNCTIONS_TEMPLATE}"
-            if generate_data.user.facts:
-                for fact in generate_data.user.facts:
-                    system_message += f"\n{fact.id} - {fact.description}"
-            else:
-                system_message += f"\nList is empty."
-        if settings.NEBULA_FUNCTIONALITY_ENABLED:
-            system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}"
-    
-    logger.info(f"System message: {system_message}")
-    messages.append({
-        "role": "system",
-        "content": system_message
-    })
-    
-    # Добавление сообщений из истории чата
-    # Проходим по всем nonce в порядке возрастания
-    for nonce in sorted(generate_data.chat.messages.keys()):
-        # Выбираем сообщение с наибольшим selected_at
-        message = max(generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
-        messages.append({
-            "role": message.sender.value,
-            "content": message.content
-        })
-    messages.append({
-        "role": "system",
-        "content": "!Do not forget about your starting instructions before answering the user's last message!"
-    })
-    
     try:
-        # Отправка запроса к OpenAI
-        model_name = generate_data.chat_settings.model.value  # Получаем строковое значение из enum
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=1500
-        )
-        
-        # Получение ответа
-        content = response.choices[0].message.content
+        logger.info(f"Configuring prompt service ...")
+        prompt_service = PromptService(generate_data)
+        logger.info(f"Setting up AI provider ...")
+        logger.info(f"Model: {generate_data.chat_settings.model} model value: {generate_data.chat_settings.model.value} gemini value: {enums.Model.GEMINI_2_FLASH.value}")
+        if generate_data.chat_settings.model in (enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI) and settings.OPENAI_API_KEY:
+            ai_provider = openai.OpenAIProvider()
+        elif generate_data.chat_settings.model in (enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO) and settings.GEMINI_API_KEY:
+            ai_provider = gemini.GeminiProvider()
+        else:
+            raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
+        logger.info(f"Generating response ...")
+        raw_answer = await ai_provider.generate_response(prompt_service)
+        logger.info(f"Response generated: {raw_answer}")
         
         # Определение нового nonce (следующий после последнего в чате)
         last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
@@ -223,7 +116,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         
         if settings.FUNCTIONALITY_ENABLED:
             # Обработка команд в тексте
-            agent_function_calling_result = await handle_agent_functions(content, user_id, db)
+            agent_function_calling_result = await handle_agent_functions(raw_answer, user_id, db)
         
         # Создание объекта сообщения
         result_messages = []

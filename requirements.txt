@@ -9,6 +9,7 @@ pyjwt
 python-jose
 alembic
 openai
+google-genai
 eth-account
 eth-utils
 alembic-postgresql-enum

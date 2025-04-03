@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # App settings
     SECRET_KEY: str = "your-secret-key"
     DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
     
     # JWT settings
     JWT_SECRET_KEY: str = "your-secret-key"  # Default use main SECRET_KEY
@@ -47,9 +48,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
     MAX_DAILY_QUESTIONS: int = 3
 
-    # OpenAI and AI settings
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    # AI providers keys and settings
+    OPENAI_API_KEY: str | None = None
+    GEMINI_API_KEY: str | None = None
+    
+    # Chat settings
     MAX_DAILY_MESSAGES: int = 10
     DEFAULT_CHAT_CONTEXT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
     
