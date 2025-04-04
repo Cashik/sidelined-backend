@@ -32,7 +32,7 @@ class CreateMessageResponse(BaseModel):
 class RegenerateMessageRequest(BaseModel):
     chat_id: int
     nonce: int
-    model: enums.Model
+    model: Optional[enums.Model] = None
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
@@ -70,11 +70,15 @@ async def create_message(
     # если nonce не указан, то добавляем в конец чата
     # !если nonce указан, то последующие сообщения удаляются
     # TODO: стоит ли доверять nonce с клиента? если нет, то нужно отделить возможность возвращаться к старым сообщениям в отдельный метод
+    
+    # Используем модель по умолчанию, если не задана
+    model = create_message_request.model or settings.DEFAULT_AI_MODEL
+    
     user_message = schemas.Message(
         content=create_message_request.message,
         sender=enums.Role.USER,
         recipient=enums.Role.ASSISTANT,
-        model=create_message_request.model,
+        model=model,
         nonce=create_message_request.nonce,
         chat_style=create_message_request.chat_style,
         chat_details_level=create_message_request.chat_details_level,
@@ -84,7 +88,7 @@ async def create_message(
     chat: schemas.Chat = await crud.add_message(db, create_message_request.chat_id, user_message, user.id)
     # генерируем ответ от ИИ
     chat_settings = schemas.GenerateMessageSettings(
-        model=create_message_request.model,
+        model=model,
         chat_style=create_message_request.chat_style,
         chat_details_level=create_message_request.chat_details_level,
     )
@@ -118,6 +122,10 @@ async def regenerate_message(
 ):
     # получаем все сообщения до запрошенного
     chat: schemas.Chat = await crud.get_user_chat(db, request.chat_id, user.id, to_nonce=request.nonce-1)
+    
+    # Используем модель по умолчанию, если не задана
+    model = request.model or settings.DEFAULT_AI_MODEL
+    
     # генерируем новое сообщение от ИИ
     user_facts = [schemas.FactAboutUser(
         id=fact.id,
@@ -130,7 +138,7 @@ async def regenerate_message(
         facts=user_facts,
     )
     chat_settings = schemas.GenerateMessageSettings(
-        model=request.model,
+        model=model,
         chat_style=request.chat_style,
         chat_details_level=request.chat_details_level,
     )

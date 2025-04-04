@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     # Chat settings
     MAX_DAILY_MESSAGES: int = 10
     DEFAULT_CHAT_CONTEXT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
+    DEFAULT_AI_MODEL: enums.Model = enums.Model.GPT_4O
     
     # Thirdweb settings
     THIRDWEB_APP_ID: str
