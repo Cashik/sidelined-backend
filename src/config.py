@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Server settings
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    DOMAIN: str = "localhost:8000"  # Домен для аутентификации
     
     # Флаг для тестового окружения
     TESTING: bool = False

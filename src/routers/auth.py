@@ -11,6 +11,7 @@ from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
 from src import models
+from src.config import settings
 
 router = APIRouter(prefix="/auth")
 
@@ -18,8 +19,8 @@ router = APIRouter(prefix="/auth")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-LOGIN_STATEMENT = "Войдите в приложение Sidelined AI используя свой кошелек."
-DOMAIN = "localhost:8000"
+LOGIN_STATEMENT = "Sign in to Sidelined AI using your wallet with required tokens on balance."
+DOMAIN = settings.DOMAIN
 
 
 @router.post("/login", response_model=schemas.LoginResponse)
