@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 LOGIN_STATEMENT = "Sign in to Sidelined AI using your wallet with required tokens on balance."
 DOMAIN = settings.DOMAIN
 
+def get_supported_chain_ids() -> set[int]:
+    """Получает список поддерживаемых chain_id из настроек токенов"""
+    return {req.token.chain_id.value for req in settings.TOKEN_REQUIREMENTS}
 
 @router.post("/login", response_model=schemas.LoginResponse)
 async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
@@ -58,6 +61,15 @@ async def do_logout():
 @router.post("/login-payload", response_model=schemas.LoginPayload)
 async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
     logger.info(f"Login payload request received with data: {payload_request}")
+    
+    # Проверяем, поддерживается ли указанная сеть
+    supported_chain_ids = get_supported_chain_ids()
+    if payload_request.chainId not in supported_chain_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported chain ID. Supported chains: {', '.join(map(str, supported_chain_ids))}"
+        )
+    
     # Генерация уникального nonce
     nonce = str(uuid.uuid4())
     # Текущее время в миллисекундах для срока действия
