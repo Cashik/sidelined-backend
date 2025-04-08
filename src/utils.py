@@ -143,6 +143,8 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                 recipient=enums.Role.USER,
                 model=generate_data.chat_settings.model,
                 nonce=new_nonce,
+                chat_style=generate_data.chat_settings.chat_style,
+                chat_details_level=generate_data.chat_settings.chat_details_level,
                 created_at=now_timestamp(),
                 selected_at=now_timestamp()
             ))
