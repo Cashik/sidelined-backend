@@ -51,6 +51,7 @@ app.add_middleware(
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_methods=["POST", "GET", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["X-New-Token"],
 )
 
 def get_db():
