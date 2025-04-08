@@ -308,7 +308,7 @@ async def add_user_facts(
     user_id: int,
     facts: List[str],
     session: Session
-) -> models.User:
+) -> Tuple[models.User, List[str]]:
     """
     Добавление новых фактов о пользователе разом
     """
@@ -325,14 +325,14 @@ async def add_user_facts(
     session.add_all(new_facts)
     session.commit()
     session.refresh(user)
-    return user
+    return user, [fact.description for fact in new_facts]
 
 
 async def delete_user_facts(
     user_id: int,
     fact_ids: List[int],
     session: Session
-) -> models.User:
+) -> Tuple[models.User, List[str]]:
     """
     Удаление фактов о пользователе
     """
@@ -340,6 +340,7 @@ async def delete_user_facts(
     if not user:
         raise exceptions.UserNotFoundException()
 
+    deleted_facts = []
     # Удаляем факты
     for fact_id in fact_ids:
         # Проверяем, принадлежит ли факт пользователю
@@ -350,12 +351,13 @@ async def delete_user_facts(
         fact = session.execute(fact_stmt).scalar_one_or_none()
         
         if not fact:
-            raise exceptions.FactNotFoundException()
+            raise exceptions.FactNotFoundException(f"Fact with id {fact_id} not found")
         
         # Удаляем факт
         session.delete(fact)
+        deleted_facts.append(fact.description)
 
     session.commit()
     session.refresh(user)
-    return user
+    return user, deleted_facts
 

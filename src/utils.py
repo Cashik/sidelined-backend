@@ -1,6 +1,7 @@
 import re
 import time
 import json
+import os
 from typing import Optional, Dict, List, Any
 import logging
 import openai
@@ -60,7 +61,25 @@ async def handle_agent_functions(raw_message: str, user_id: int, db: Session) ->
                 ))
         elif function_name == "add_facts" and settings.FACTS_FUNCTIONALITY_ENABLED:
             try:
-                facts: list[str] = json.loads(args)
+                # Пробуем более гибкий парсинг аргументов
+                facts_arg = args.strip()
+                if facts_arg.startswith('[') and facts_arg.endswith(']'):
+                    # Обработка аргументов в формате строкового представления списка
+                    # Сначала пробуем стандартный json.loads
+                    try:
+                        facts = json.loads(facts_arg)
+                    except json.JSONDecodeError:
+                        # Если стандартный парсинг не сработал, пробуем извлечь элементы списка вручную
+                        # Извлекаем строки между кавычками и очищаем их от пробелов
+                        facts = []
+                        # Ищем все строки в кавычках (одинарных или двойных)
+                        items = re.findall(r'[\'"]([^\'"]*)[\'"]', facts_arg)
+                        for item in items:
+                            facts.append(item.strip())
+                else:
+                    # Если передана одна строка без скобок списка, упаковываем её в список
+                    facts = [facts_arg.strip("'").strip('"')]
+                
                 await crud.add_user_facts(user_id, facts, db)
             except Exception as e:
                 logger.error(f"Error adding facts: {e}")
@@ -107,48 +126,82 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         else:
             raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
         logger.info(f"Generating response ...")
-        raw_answer = await ai_provider.generate_response(prompt_service)
-        logger.info(f"Response generated: {raw_answer}")
+        provider_answer: schemas.GeneratedResponse = await ai_provider.generate_response(prompt_service)
+        logger.info(f"Response generated: {provider_answer}")
+        
         
         # Определение нового nonce (следующий после последнего в чате)
         last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
         new_nonce = last_nonce + 1
         
-        if settings.FUNCTIONALITY_ENABLED:
-            # Обработка команд в тексте
-            agent_function_calling_result = await handle_agent_functions(raw_answer, user_id, db)
-        
-        # Создание объекта сообщения
         result_messages = []
-        # Добавляем новые сообщение от агента
-        result_messages.append(schemas.Message(
-            content=agent_function_calling_result.edited_raw_message,
-            sender=enums.Role.ASSISTANT,
-            recipient=enums.Role.USER,
-            model=generate_data.chat_settings.model,
-            nonce=new_nonce,
-            created_at=now_timestamp(),
-            selected_at=now_timestamp()
-        ))
-        # Если есть новые сообщения от системы, добавляем их
-        for message in agent_function_calling_result.new_messages:
-            new_nonce += 1
+        
+        if provider_answer.text:
             result_messages.append(schemas.Message(
-                content=message.message,
-                sender=enums.Role.SYSTEM,
+                content=provider_answer.text,
+                sender=enums.Role.ASSISTANT,
                 recipient=enums.Role.USER,
                 model=generate_data.chat_settings.model,
                 nonce=new_nonce,
                 created_at=now_timestamp(),
                 selected_at=now_timestamp()
             ))
+            new_nonce += 1
+        
+        if provider_answer.function_calls and settings.FUNCTIONALITY_ENABLED:
+            for function_call in provider_answer.function_calls:
+                if function_call.name == "add_facts":
+                    user, added_facts = await crud.add_user_facts(user_id, function_call.args, db)
+                    result_messages.append(schemas.Message(
+                        content=f"Added notes:{os.linesep.join(added_facts)}",
+                        sender=enums.Role.SYSTEM,
+                        recipient=enums.Role.ASSISTANT,
+                        model=generate_data.chat_settings.model,
+                        nonce=new_nonce,
+                        created_at=now_timestamp(),
+                        selected_at=now_timestamp()
+                    ))
+                elif function_call.name == "del_facts":
+                    try:
+                        user, deleted_facts = await crud.delete_user_facts(user_id, function_call.args, db)
+                        result_messages.append(schemas.Message(
+                            content=f"Deleted notes:{os.linesep.join(deleted_facts)}",  
+                            sender=enums.Role.SYSTEM,
+                            recipient=enums.Role.ASSISTANT,
+                            model=generate_data.chat_settings.model,
+                            nonce=new_nonce,
+                            created_at=now_timestamp(),
+                            selected_at=now_timestamp()
+                        ))
+                    except exceptions.FactNotFoundException as e:
+                        logger.error(f"Error deleting notes: {e}")
+                        result_messages.append(schemas.Message(
+                            content=f"Error deleting notes: {str(e)}",
+                            sender=enums.Role.SYSTEM,
+                            recipient=enums.Role.ASSISTANT,
+                            model=generate_data.chat_settings.model,
+                            nonce=new_nonce,
+                            created_at=now_timestamp(),
+                            selected_at=now_timestamp()
+                        ))
+                else:
+                    result_messages.append(schemas.Message(
+                        content=f"Failed to call function {function_call.name} with arguments {function_call.args}. Function is not exists!",
+                        sender=enums.Role.SYSTEM,
+                        recipient=enums.Role.ASSISTANT,
+                        model=generate_data.chat_settings.model,
+                        nonce=new_nonce,
+                        created_at=now_timestamp(),
+                        selected_at=now_timestamp()
+                    ))
+                new_nonce += 1
         
         return result_messages
         
-    except Exception as e:
+    except exceptions.InvalidNonceException as e:
         # В случае ошибки создаем сообщение с текстом ошибки
         if settings.DEBUG:
-            error_message = f"Error while generating answer: {str(e)}"
+            error_message = f"Error while generating answer details: {str(e)}"
         else:
             error_message = "Error while generating answer. Please try again later."
         

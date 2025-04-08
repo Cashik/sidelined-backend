@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from decimal import Decimal
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -154,4 +154,20 @@ class AssistantGenerateData(BaseModel):
     chat_settings: GenerateMessageSettings
 
     
+# Схемы для вызова функций
+
+class FunctionCall(BaseModel):
+    name: str
+    args: Optional[Any] = None
+
+class AddFactsFunctionCall(FunctionCall):
+    name: str = "add_facts"
+    args: List[str]
     
+class RemoveFactsFunctionCall(FunctionCall):
+    name: str = "del_facts"
+    args: List[int]
+    
+class GeneratedResponse(BaseModel):
+    text: str
+    function_calls: Optional[List[FunctionCall]] = None
