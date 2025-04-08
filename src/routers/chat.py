@@ -2,12 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, desc
 
 from src import schemas, enums, models, crud, utils
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
 from src.config import settings
+from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -120,6 +121,23 @@ async def regenerate_message(
     available_balance: bool = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session),
 ):
+    # получаем сообщение для регенерации
+    message_to_regenerate = db.execute(
+        select(models.Message)
+        .where(
+            models.Message.chat_id == request.chat_id,
+            models.Message.nonce == request.nonce
+        )
+        .order_by(desc(models.Message.selected_at))
+        .limit(1)
+    ).scalar_one_or_none()
+    
+    if not message_to_regenerate:
+        raise MessageNotFoundException()
+        
+    if message_to_regenerate.sender != enums.Role.ASSISTANT:
+        raise InvalidMessageTypeException("Can only regenerate assistant messages")
+    
     # получаем все сообщения до запрошенного
     chat: schemas.Chat = await crud.get_user_chat(db, request.chat_id, user.id, to_nonce=request.nonce-1)
     

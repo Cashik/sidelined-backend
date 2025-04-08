@@ -35,3 +35,9 @@ class FactNotFoundException(Exception):
     """Исключение, возникающее когда факт не найден"""
     pass
 
+class MessageNotFoundException(Exception):
+    pass
+
+class InvalidMessageTypeException(Exception):
+    pass
+
