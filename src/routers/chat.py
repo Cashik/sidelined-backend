@@ -57,7 +57,9 @@ async def get_chats(user: models.User = Depends(get_current_user), db: Session =
 
 @router.get("/{id}", response_model=ChatResponse)
 async def get_chat(id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    chat = await crud.get_user_chat(db, id, user.id, from_nonce=0)
+    # В режиме DEBUG возвращаем все сообщения, иначе только для пользователя
+    recipient = None if settings.DEBUG else enums.Role.USER
+    chat = await crud.get_user_chat(db, id, user.id, from_nonce=0, recipient=recipient)
     return ChatResponse(chat=chat)
 
 @router.post("/message", response_model=CreateMessageResponse)

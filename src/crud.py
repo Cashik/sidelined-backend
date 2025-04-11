@@ -73,11 +73,19 @@ async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.Chat
     return result
 
 
-async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Optional[int] = None, to_nonce: Optional[int] = None) -> schemas.Chat:
+async def get_user_chat(
+    db: Session, 
+    chat_id: int, 
+    user_id: int, 
+    from_nonce: Optional[int] = None, 
+    to_nonce: Optional[int] = None,
+    recipient: Optional[enums.Role] = None
+) -> schemas.Chat:
     """
     Получение информации о чате пользователя с сообщениями в диапазоне nonce
     from_nonce - с какого nonce начать (включительно)
     to_nonce - до какого nonce включать (включительно)
+    recipient - фильтр по получателю сообщений (если None, то фильтрация не применяется)
     Если from_nonce=None, начинает с начала чата
     Если to_nonce=None, включает до последнего сообщения
     если чат не найден или не принадлежит пользователю, то ошибка
@@ -101,6 +109,15 @@ async def get_user_chat(db: Session, chat_id: int, user_id: int, from_nonce: Opt
     messages_stmt = select(models.Message).where(
         models.Message.chat_id == chat_id
     )
+    
+    # Добавляем фильтр по получателю или отправителю, если указан
+    if recipient is not None:
+        messages_stmt = messages_stmt.where(
+            or_(
+                models.Message.recipient == recipient,  # Сообщения для пользователя
+                models.Message.sender == enums.Role.USER  # Сообщения от пользователя
+            )
+        )
     
     # Добавляем условия для from_nonce и to_nonce, если они указаны
     if from_nonce is not None:
@@ -222,8 +239,9 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
     db.add(new_message)
     db.commit()
     
-    # Возвращаем обновленный чат
-    return await get_user_chat(db, chat_id, user_id)
+    # Возвращаем обновленный чат с учетом режима DEBUG
+    recipient = None if settings.DEBUG else enums.Role.USER
+    return await get_user_chat(db, chat_id, user_id, recipient=recipient)
 
 
 async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
