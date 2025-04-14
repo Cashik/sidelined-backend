@@ -16,6 +16,17 @@ requirements = [
         ),
         balance=1000
     ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0xA70acF9Cbb8CA5F6c2A9273283fb17C195ab7a43",
+            interface=enums.TokenInterface.ERC20,
+            decimals=8,
+            symbol="wRIZ",
+            name="Staked RIZ"
+        ),
+        balance=1000
+    ),
 ]
 
 
