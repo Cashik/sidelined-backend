@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def get_or_create_user(address: str, chain_id: int, session: Session) -> models.User:
+async def get_or_create_user(address: str, session: Session) -> models.User:
     # Сначала ищем пользователя по адресу
     stmt = select(models.WalletAddress).where(
         models.WalletAddress.address == address.lower()
@@ -24,7 +24,7 @@ async def get_or_create_user(address: str, chain_id: int, session: Session) -> m
         return wallet.user
     
     # Если адрес не найден, создаем нового пользователя
-    user = models.User(chain_id=chain_id)
+    user = models.User()
     session.add(user)
     session.commit()
     session.refresh(user)

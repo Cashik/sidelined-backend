@@ -39,10 +39,8 @@ class WalletAddressDeleteRequest(BaseModel):
 def db_user_to_schema_user(user: models.User) -> schemas.User:
     facts = [schemas.UserFact(id=fact.id, description=fact.description, created_at=fact.created_at) for fact in user.facts]
     wallet_addresses = [schemas.WalletAddress(address=wallet.address, created_at=wallet.created_at) for wallet in user.wallet_addresses]
-    print(f"user data: {user.chain_id}")
     return schemas.User(
         address=wallet_addresses[0].address,
-        chain_id=user.chain_id,
         profile=schemas.UserProfile(
             preferred_name=user.preferred_name, 
             user_context=user.user_context,

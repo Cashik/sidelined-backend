@@ -25,7 +25,6 @@ class User(Base):
     __tablename__ = "user"
 
     id = Column(Integer, primary_key=True, index=True)
-    chain_id = Column(Integer)
     created_at = Column(Integer, default=now_timestamp)
     
     # информация о пользователе

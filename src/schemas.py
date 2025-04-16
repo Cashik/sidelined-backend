@@ -63,8 +63,8 @@ class UserChatSettings(BaseModel):
     preferred_chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
 class User(BaseModel):
-    address: str
-    chain_id: int
+    address: Optional[str] = None # deprecated
+    chain_id: Optional[int] = None # deprecated
     profile: UserProfile
     chat_settings: UserChatSettings
     wallet_addresses: List[WalletAddress]

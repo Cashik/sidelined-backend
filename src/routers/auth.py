@@ -41,7 +41,6 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     # Получаем или создаем пользователя
     user = await crud.get_or_create_user(
         address=request.payload.address,
-        chain_id=request.payload.chain_id,
         session=db
     )
     
@@ -76,14 +75,6 @@ async def do_logout():
 async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
     logger.info(f"Login payload request received with data: {payload_request}")
     
-    # Проверяем, поддерживается ли указанная сеть
-    supported_chain_ids = get_supported_chain_ids()
-    if payload_request.chainId not in supported_chain_ids:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported chain ID. Supported chains: {', '.join(map(str, supported_chain_ids))}"
-        )
-    
     # Генерация уникального nonce
     nonce = str(uuid.uuid4())
     # Текущее время в миллисекундах для срока действия
@@ -100,6 +91,7 @@ async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
         issued_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         expiration_time=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(expiration_time / 1000)),
     )
+    
     
     logger.info(f"Generated login payload: {payload}")
     return payload
