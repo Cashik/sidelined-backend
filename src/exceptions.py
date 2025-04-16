@@ -41,3 +41,15 @@ class MessageNotFoundException(Exception):
 class InvalidMessageTypeException(Exception):
     pass
 
+class AddressAlreadyExistsException(Exception):
+    """Исключение, возникающее при попытке добавить уже существующий адрес"""
+    pass
+
+class AddressNotFoundException(Exception):
+    """Исключение, возникающее при попытке удалить несуществующий адрес"""
+    pass
+
+class LastAddressException(Exception):
+    """Исключение, возникающее при попытке удалить последний адрес пользователя"""
+    pass
+

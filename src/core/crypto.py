@@ -3,6 +3,8 @@ from eth_account import Account
 from eth_utils import to_checksum_address, is_address, is_checksum_address
 import json
 import logging
+from datetime import datetime, timedelta, timezone
+import random
 
 from src import schemas
 
@@ -118,6 +120,86 @@ def is_valid_address(address: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error validating address: {str(e)}")
+        return False
+
+def create_login_payload(
+    address: str,
+    chain_id: int,
+    domain: str = "sidelined.ai",
+    statement: str = "Please sign this message to login to Sidelined AI",
+    uri: str = "https://sidelined.ai",
+    version: str = "1",
+    expiration_hours: int = 24
+) -> schemas.LoginPayload:
+    """
+    Создает payload для подписи при логине или добавлении адреса
+    
+    Args:
+        address: Ethereum адрес
+        chain_id: ID сети
+        domain: Домен приложения
+        statement: Сообщение для подписи
+        uri: URI приложения
+        version: Версия payload
+        expiration_hours: Время жизни payload в часах
+        
+    Returns:
+        LoginPayload: Созданный payload
+    """
+    issued_at = datetime.utcnow().isoformat()
+    expiration_time = (datetime.utcnow() + timedelta(hours=expiration_hours)).isoformat()
+    
+    return schemas.LoginPayload(
+        domain=domain,
+        address=address,
+        statement=statement,
+        uri=uri,
+        version=version,
+        chain_id=chain_id,
+        nonce=str(random.randint(0, 1000000)),
+        issued_at=issued_at,
+        expiration_time=expiration_time
+    )
+
+def validate_payload(payload: schemas.LoginPayload) -> bool:
+    """
+    Проверяет валидность payload'а
+    
+    Args:
+        payload: Payload для проверки
+        
+    Returns:
+        bool: True если payload валиден, False в противном случае
+    """
+    try:
+        # Проверяем валидность адреса
+        if not is_valid_address(payload.address):
+            return False
+            
+        # Проверяем время
+        issued_at = datetime.fromisoformat(payload.issued_at.replace('Z', '+00:00'))
+        expiration_time = datetime.fromisoformat(payload.expiration_time.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        
+        if now < issued_at or now > expiration_time:
+            logger.warning(f"Payload time validation failed: now={now}, issued_at={issued_at}, expiration_time={expiration_time}")
+            return False
+            
+        # Проверяем обязательные поля
+        if not all([
+            payload.domain,
+            payload.statement,
+            payload.uri,
+            payload.version,
+            payload.nonce,
+            payload.chain_id
+        ]):
+            return False
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating payload: {str(e)}")
         return False
 
 

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src import crud, schemas, utils
-from src.core.crypto import verify_signature, is_valid_address
+from src.core.crypto import verify_signature, validate_payload
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
@@ -30,27 +30,41 @@ def get_supported_chain_ids() -> set[int]:
 async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
     logger.info(f"Login data received: {request}")
     
+    # Проверяем валидность payload'а
+    if not validate_payload(request.payload):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    
+    # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
-    if not is_valid_address(request.payload.address):
-        raise HTTPException(status_code=401, detail="Invalid address")
     
-    user = await crud.get_or_create_user(request.payload.address, request.payload.chain_id, db)
+    # Получаем или создаем пользователя
+    user = await crud.get_or_create_user(
+        address=request.payload.address,
+        chain_id=request.payload.chain_id,
+        session=db
+    )
     
-    # Проверяем баланс при логине
-    balance_check_success = await utils.check_user_access(user.address, user.chain_id)
+    # Проверяем баланс
+    balance_check_success = await utils.check_user_access(user)
     
-    # Создаем payload для токена
+    # Создаем токен
     token_payload = schemas.TokenPayload(
         user_id=user.id,
-        address=user.address,
-        chain_id=user.chain_id,
         balance_check_time=int(time.time()),
         balance_check_success=balance_check_success
     )
-    
     token = create_token(token_payload)
-    return schemas.LoginResponse(access_token=token, chat_available=balance_check_success)
+    
+    # Логируем информацию о пользователе
+    address = user.wallet_addresses[0].address if user.wallet_addresses else "no address"
+    logger.info(f"User is logged in: {user.id} ({address})")
+    
+    return schemas.LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        chat_available=balance_check_success
+    )
 
 @router.post("/logout")
 async def do_logout():
@@ -102,7 +116,7 @@ async def is_logged_in(user: models.User = Depends(get_optional_user)):
     logger.info("Check if user is logged in")
     
     if user:
-        logger.info(f"User is logged in: {user.id} ({user.address})")
+        logger.info(f"User is logged in: {user.id} ({user.wallet_addresses})")
         return schemas.IsLoginResponse(logged_in=True)
     
     logger.info("User is not logged in")

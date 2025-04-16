@@ -225,36 +225,56 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         return [answer_message]
 
 
-async def check_user_access(user_address: str, user_chain_id: int) -> bool:
+async def check_user_access(user: models.User) -> bool:
     """
-    Проверка баланса пользователя в Thirdweb
-    """
-    # для начала отсеиваем все требования по цепочкам, кроме той, что указана в user_chain_id
-    requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.chain_id.value == user_chain_id]
+    Проверяет доступ пользователя к чату на основе баланса токенов.
     
-    if not requirements:
+    Args:
+        user: Объект пользователя
+        
+    Returns:
+        bool: True если у пользователя достаточно токенов, False в противном случае
+    """
+    if not user.wallet_addresses:
         return False
     
-    # какие-то требования остались, значит нужно проверить балансы
+    # Получаем все уникальные chain_id из требований
+    required_chain_ids = {req.token.chain_id.value for req in settings.TOKEN_REQUIREMENTS}
     
+    # Создаем экземпляр сервиса Thirdweb
     thirdweb = thirdweb_service.ThirdwebService(
         app_id=settings.THIRDWEB_APP_ID,
         private_key=settings.THIRDWEB_PRIVATE_KEY
     )
     
-    # получаем балансы всех токенов
-    try:
-        balances: list[thirdweb_service.TokenBalance] = await thirdweb.get_balances(user_address, user_chain_id, enums.TokenInterface.ERC20)
-    except exceptions.ThirdwebServiceException:
-        return settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN
-    
-    # далее проходим по всем требованиям и проверяем баланс
-    for req in requirements:
-        for balance in balances:
-            if balance.address_lower == req.token.address.lower() and balance.chain_id == user_chain_id:
-                actual_balance = balance.balance//(10**req.token.decimals)
-                if actual_balance >= req.balance:
-                    return True
-    
-    # ничего не подошло, значит баланс не соответствует ни одному требованию
+    # Для каждого адреса проверяем балансы
+    for wallet_address in user.wallet_addresses:
+        try:
+            # Получаем балансы для всех требуемых сетей одним запросом
+            balances = await thirdweb.get_balances(
+                owner_address=wallet_address.address,
+                chain_ids=list(required_chain_ids),
+                interface=enums.TokenInterface.ERC20
+            )
+            
+            # Проверяем каждое требование
+            for req in settings.TOKEN_REQUIREMENTS:
+                # Ищем баланс для текущего требования
+                balance = next(
+                    (b for b in balances 
+                     if b.address_lower == req.token.address.lower() 
+                     and b.chain_id == req.token.chain_id.value),
+                    None
+                )
+                
+                if balance:
+                    # Учитываем десятичные знаки токена
+                    actual_balance = balance.balance / (10 ** req.token.decimals)
+                    if actual_balance >= req.balance:
+                        return True
+                        
+        except Exception as e:
+            logger.error(f"Error checking balance for address {wallet_address.address}: {str(e)}")
+            continue
+            
     return False

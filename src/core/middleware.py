@@ -63,7 +63,9 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
-        logger.info(f"Authenticated user: {user.id} ({user.address})")
+        # Получаем первый адрес кошелька для логирования
+        address = user.wallet_addresses[0].address if user.wallet_addresses else "no address"
+        logger.info(f"Authenticated user: {user.id} ({address})")
         return user
         
     except HTTPException:
@@ -113,21 +115,14 @@ async def get_optional_user(
         return None
     
 
-
-
-
-
 async def check_balance_and_update_token(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    response: Response = None
+    response: Response = None,
+    db: Session = Depends(get_session)
 ) -> bool:
     """
-    миделвар, который берет кредентиалсы, извлекает из них данные проверки.
-    если 
-    проверка успешная и время ок, то конец
-    если проверка неуспешная или была дольше чем нужно, то запускаем новую
-    если новая провека ок, то добавляем новый токен в хедер и конец
-    иначе вызываем особую ошибку, по которой фронт поймет, что доступа к этому апи нет
+    Middleware для проверки баланса и обновления токена.
+    Проверяет баланс токенов пользователя и обновляет токен при необходимости.
     """
     exception = HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -147,10 +142,14 @@ async def check_balance_and_update_token(
         return True
     
     # проверка не прошла, значит нужно сделать новую
-    address: str = payload["address"]
-    chain_id: int = payload["chain_id"]
+    user_id: int = payload["user_id"]
     try:
-        balance_check_success: bool = await utils.check_user_access(address, chain_id)
+        # Получаем пользователя из базы данных
+        user = await crud.get_user_by_id(user_id, db)
+        if not user:
+            raise exception
+            
+        balance_check_success: bool = await utils.check_user_access(user)
     except Exception as e:
         logger.error(f"Balance check failed: {str(e)}")
         if settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN:
@@ -162,9 +161,7 @@ async def check_balance_and_update_token(
     if balance_check_success:
         # создаем новый токен
         new_token_payload = schemas.TokenPayload(
-            user_id=payload["user_id"],
-            address=address,
-            chain_id=chain_id,
+            user_id=user_id,
             balance_check_time=current_time,
             balance_check_success=balance_check_success
         )

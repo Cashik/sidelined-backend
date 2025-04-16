@@ -14,20 +14,31 @@ logger = logging.getLogger(__name__)
 
 
 async def get_or_create_user(address: str, chain_id: int, session: Session) -> models.User:
-    stmt = select(models.User).where(
-        models.User.address == address,
-        models.User.chain_id == chain_id
+    # Сначала ищем пользователя по адресу
+    stmt = select(models.WalletAddress).where(
+        models.WalletAddress.address == address.lower()
     )
-    user = session.execute(stmt).scalar_one_or_none()
+    wallet = session.execute(stmt).scalar_one_or_none()
     
-    if user:
-        return user
-    else:
-        user = models.User(address=address, chain_id=chain_id)
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        return user
+    if wallet:
+        return wallet.user
+    
+    # Если адрес не найден, создаем нового пользователя
+    user = models.User(chain_id=chain_id)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    # Создаем запись адреса для пользователя
+    wallet = models.WalletAddress(
+        user_id=user.id,
+        address=address.lower()
+    )
+    session.add(wallet)
+    session.commit()
+    session.refresh(user)
+    
+    return user
 
 
 async def get_user_by_id(user_id: int, session: Session) -> Optional[models.User]:
@@ -378,4 +389,84 @@ async def delete_user_facts(
     session.commit()
     session.refresh(user)
     return user, deleted_facts
+
+
+async def add_user_address(
+    user_id: int,
+    address: str,
+    session: Session
+) -> models.WalletAddress:
+    """
+    Добавление нового адреса кошелька пользователю
+    
+    Args:
+        user_id: ID пользователя
+        address: Адрес кошелька (будет преобразован в lowercase)
+        session: Сессия базы данных
+        
+    Returns:
+        WalletAddress: Созданный адрес кошелька
+        
+    Raises:
+        exceptions.AddressAlreadyExistsException: Если адрес уже существует в системе
+    """
+    # Проверяем, существует ли адрес в системе
+    stmt = select(models.WalletAddress).where(
+        models.WalletAddress.address == address.lower()
+    )
+    existing_address = session.execute(stmt).scalar_one_or_none()
+    
+    if existing_address:
+        raise exceptions.AddressAlreadyExistsException()
+    
+    # Создаем новый адрес
+    wallet = models.WalletAddress(
+        user_id=user_id,
+        address=address.lower()
+    )
+    session.add(wallet)
+    session.commit()
+    session.refresh(wallet)
+    
+    return wallet
+
+async def delete_user_address(
+    user_id: int,
+    address: str,
+    session: Session
+) -> None:
+    """
+    Удаление адреса кошелька пользователя
+    
+    Args:
+        user_id: ID пользователя
+        address: Адрес кошелька (будет преобразован в lowercase)
+        session: Сессия базы данных
+        
+    Raises:
+        exceptions.AddressNotFoundException: Если адрес не найден
+        exceptions.LastAddressException: Если это последний адрес пользователя
+    """
+    # Получаем адрес
+    stmt = select(models.WalletAddress).where(
+        models.WalletAddress.address == address.lower(),
+        models.WalletAddress.user_id == user_id
+    )
+    wallet = session.execute(stmt).scalar_one_or_none()
+    
+    if not wallet:
+        raise exceptions.AddressNotFoundException()
+    
+    # Проверяем, не последний ли это адрес пользователя
+    stmt = select(func.count()).where(
+        models.WalletAddress.user_id == user_id
+    )
+    address_count = session.execute(stmt).scalar_one()
+    
+    if address_count <= 1:
+        raise exceptions.LastAddressException()
+    
+    # Удаляем адрес
+    session.delete(wallet)
+    session.commit()
 

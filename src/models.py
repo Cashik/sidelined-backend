@@ -25,7 +25,6 @@ class User(Base):
     __tablename__ = "user"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String)
     chain_id = Column(Integer)
     created_at = Column(Integer, default=now_timestamp)
     
@@ -39,6 +38,18 @@ class User(Base):
     # Relationships
     chats = relationship("Chat", back_populates="user")
     facts = relationship("UserFact", back_populates="user")
+    wallet_addresses = relationship("WalletAddress", back_populates="user")
+
+class WalletAddress(Base):
+    __tablename__ = "wallet_address"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id"))
+    address = Column(String, unique=True)  # Адрес в lowercase
+    created_at = Column(Integer, default=now_timestamp)
+    
+    # Relationships
+    user = relationship("User", back_populates="wallet_addresses")
 
 class UserFact(Base):
     __tablename__ = "user_fact"

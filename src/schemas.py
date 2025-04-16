@@ -48,6 +48,10 @@ class UserFact(BaseModel):
     description: str
     created_at: int
 
+class WalletAddress(BaseModel):
+    address: str
+    created_at: int
+
 class UserProfile(BaseModel):
     preferred_name: Optional[str] = None
     user_context: Optional[str] = None
@@ -63,6 +67,7 @@ class User(BaseModel):
     chain_id: int
     profile: UserProfile
     chat_settings: UserChatSettings
+    wallet_addresses: List[WalletAddress]
 
 
 # бизнес-схемы токенов
@@ -85,8 +90,6 @@ class TokenRequirement(BaseModel):
 
 class TokenPayload(BaseModel):
     user_id: int
-    address: str
-    chain_id: int
     balance_check_time: int  # timestamp последней проверки
     balance_check_success: bool  # результат проверки
 

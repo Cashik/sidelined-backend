@@ -40,7 +40,7 @@ class ThirdwebService():
         self.app_id = app_id
         self.private_key = private_key
     
-    async def get_balances(self, owner_address: str, chain_id: int, interface: enums.TokenInterface) -> list[TokenBalance]:
+    async def get_balances(self, owner_address: str, chain_ids: list[int], interface: enums.TokenInterface) -> list[TokenBalance]:
         if interface != enums.TokenInterface.ERC20:
             raise NotImplementedError(f"Currently only ERC20 tokens are supported. Found {interface.value} interface.")
         
@@ -50,7 +50,7 @@ class ThirdwebService():
         url = f"{self.general_api_host}/v1/tokens/{interface.value}/{owner_address}"
         
         query_params = {
-            "chain": chain_id,
+            "chain": chain_ids,
             "limit": self.query_limit,
             "metadata": "false",
             "include_spam": "true",
@@ -63,7 +63,6 @@ class ThirdwebService():
             response.raise_for_status()
             data = response.json()
         except Exception as e:
-            # TODO: 
             logger.error(f"Error getting balances with params: {query_params} and error: {e}")
             raise exceptions.ThirdwebServiceException()
         
