@@ -470,3 +470,32 @@ async def delete_user_address(
     session.delete(wallet)
     session.commit()
 
+
+async def delete_user(user_id: int, session: Session) -> None:
+    """
+    Полностью удаляет пользователя и все связанные с ним данные:
+    - Чаты и сообщения
+    - Факты о пользователе
+    - Адреса кошельков
+    """
+    # Получаем пользователя
+    user = await get_user_by_id(user_id, session)
+    if not user:
+        raise exceptions.UserNotFoundException()
+    
+    # Удаляем все чаты пользователя (это автоматически удалит все сообщения)
+    for chat in user.chats:
+        session.delete(chat)
+    
+    # Удаляем все факты пользователя
+    for fact in user.facts:
+        session.delete(fact)
+    
+    # Удаляем все адреса кошельков
+    for address in user.wallet_addresses:
+        session.delete(address)
+    
+    # Удаляем самого пользователя
+    session.delete(user)
+    session.commit()
+
