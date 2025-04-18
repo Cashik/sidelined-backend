@@ -87,8 +87,6 @@ class OpenAIProvider(AIProvider):
         response = self.client.chat.completions.create(
             model=model_name,
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
             temperature=0.7,
             max_tokens=1500
         )

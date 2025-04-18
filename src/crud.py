@@ -499,3 +499,21 @@ async def delete_user(user_id: int, session: Session) -> None:
     session.delete(user)
     session.commit()
 
+async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[models.Message]:
+    """
+    Получение сообщений пользователя, которые не были проанализированы.
+    Сложный запрос включает в себя получение всех сообщений во всех видимых чатах пользователя, nonce которых больше чем last_analysed_nonce этого чата.
+    """
+    stmt = select(models.Message).where(
+        models.Message.chat_id.in_(
+            select(models.Chat.id).where(
+                models.Chat.user_id == user_id,
+                models.Chat.visible == True
+            )
+        ),
+        models.Message.nonce > models.Chat.last_analysed_nonce,
+        models.Message.sender == enums.Role.USER
+    )
+    return session.execute(stmt).scalars().all()
+
+

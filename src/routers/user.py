@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Body
 from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,6 +9,8 @@ from src.core.crypto import verify_signature, validate_payload
 from src.core.middleware import get_current_user
 from src.database import get_session
 from src.config import settings
+from src.services import user_context_service
+
 router = APIRouter(prefix="/user", tags=["User"])
 
 class UserProfileUpdateRequest(BaseModel):
@@ -173,6 +175,43 @@ async def delete_wallet_address(
             status_code=500,
             detail=str(e) if settings.DEBUG else "Internal server error"
         )
+
+@router.post("/update-context", response_model=dict)
+async def update_user_context(
+    background_tasks: BackgroundTasks,
+    user: models.User = Depends(get_current_user)
+):
+    """
+    Запускает фоновую задачу для обновления контекста пользователя.
+    
+    Анализирует сообщения пользователя из всех чатов,
+    обновляет информацию о пользователе и факты о нем.
+    """
+    # Запускаем фоновую задачу
+    background_tasks.add_task(
+        user_context_service.update_user_information,
+        user_id=user.id
+    )
+    
+    return {
+        "status": "success", 
+        "message": "Запущено обновление информации о пользователе в фоновом режиме"
+    }
+
+@router.post("/test-update-context", response_model=Dict[str, Any])
+async def test_update_user_context(
+    user: models.User = Depends(get_current_user)
+):
+    """
+    Тестовый эндпоинт для обновления контекста пользователя.
+    В отличие от обычного эндпоинта, выполняет операцию синхронно и возвращает результат.
+    
+    Используется для тестирования и отладки.
+    """
+    # Запускаем обновление и получаем результат
+    result = await user_context_service.update_user_information(user_id=user.id)
+    
+    return result
 
 
 

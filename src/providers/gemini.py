@@ -63,6 +63,12 @@ function_declarations=[
     ),
 ])]
 
+tools = []
+
+class GeminiNotesResponse(BaseModel):
+    delete_notes: Optional[List[int]] = None
+    new_notes: Optional[List[str]] = None
+
 
 class GeminiProvider(AIProvider):
     def __init__(self):
@@ -102,8 +108,6 @@ class GeminiProvider(AIProvider):
         
         generate_content_config = types.GenerateContentConfig(
             response_mime_type="text/plain",
-            tools=tools,
-            tool_config=tool_config,
             temperature=0.7,
             system_instruction=[
                 types.Part.from_text(text=system_prompt)
@@ -147,3 +151,17 @@ class GeminiProvider(AIProvider):
         result.function_calls = function_calls
         logger.info(f"Answer: {result}")
         return result
+
+    async def generate_notes_response(self, prompt: str) -> GeminiNotesResponse:
+        
+        generate_content_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=GeminiNotesResponse
+        )
+        
+        response = self.client.models.generate_content(
+            model=enums.Model.GEMINI_2_5_PRO.value,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=generate_content_config
+        )
+        return response.parsed

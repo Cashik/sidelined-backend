@@ -49,26 +49,21 @@ class PromptService:
             if self.generate_data.user.user_context:
                 system_message += f"\nUser added some information about himself: \n{self.generate_data.user.user_context}."
 
-            system_message += "\n\n"
-            
+            system_message += "\n"
+        
+        system_message += "\nUse language that user uses in his messages.\n"
+        
         if settings.FUNCTIONALITY_ENABLED:
             if settings.FACTS_FUNCTIONALITY_ENABLED:
-                system_message += "\nFrom previous or current conversation you have some notes about the user. Remember that the user's information is constantly evolving."
-                system_message += "\nIMPORTANT: At every new interaction, ALWAYS verify and update (or delete, if necessary) all facts about the user using your available functions!"
-                system_message += "\nInformation to focus on: any details provided by the user — including but not limited to locations, tasks, preferences, list of close people and their activities, hobbies, work, life goals, events, and any other information."
-                system_message += "\nCurrent list of notes (id - note):"
+                system_message += "\nFrom previous conversation you have some notes about the user."
+                system_message += "\nJust use it to answer user's questions more precisely."
+                system_message += "\nDO NOT TRY TO CHANGE THIS LIST."
+                system_message += "\nCurrent list of notes:"
                 if self.generate_data.user.facts:
                     for fact in self.generate_data.user.facts:
-                        system_message += f"\n{fact.id} - {fact.description}"
+                        system_message += f"\n- {fact.description}"
                 else:
                     system_message += "\nList is empty."
-                system_message += "\nRules:"
-                system_message += "\n1. Record any new information about the user, including seemingly minor details."
-                system_message += "\n2. Base new notes on the user's messages or on your verified findings. Cross-check with existing data to update outdated facts."
-                system_message += "\n3. The user is aware of this list, so do not mention it in your answers."
-                system_message += "\n4. Immediately delete or update any outdated or irrelevant notes."
-                system_message += "\n5. Always check for changes: if new information alters previous notes, update them without delay."
-                system_message += "\n6. When adding new facts, always keep them concise and summarized, avoiding excessive details."
 
             if settings.NEBULA_FUNCTIONALITY_ENABLED:
                 system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}"

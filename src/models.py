@@ -70,6 +70,7 @@ class Chat(Base):
     created_at = Column(Integer, default=now_timestamp)
     title = Column(String)
     visible = Column(Boolean, default=True)
+    last_analysed_nonce = Column(Integer, default=-1)  # -1 означает, что сообщения еще не анализировались
     
     # Relationships
     user = relationship("User", back_populates="chats")

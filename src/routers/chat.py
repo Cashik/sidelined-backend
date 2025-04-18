@@ -9,6 +9,7 @@ from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
 from src.config import settings
 from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
+from src.services import user_context_service
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -65,6 +66,7 @@ async def get_chat(id: int, user: models.User = Depends(get_current_user), db: S
 @router.post("/message", response_model=CreateMessageResponse)
 async def create_message(
     create_message_request: schemas.MessageCreate,
+    background_tasks: BackgroundTasks,
     user: models.User = Depends(get_current_user),
     available_balance: bool = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session),
@@ -89,6 +91,15 @@ async def create_message(
         selected_at=utils.now_timestamp(),
     )
     chat: schemas.Chat = await crud.add_message(db, create_message_request.chat_id, user_message, user.id)
+    
+    # Если это новый чат (был только что создан), запускаем фоновую задачу обработки контекста пользователя
+    is_new_chat = create_message_request.chat_id is None
+    if is_new_chat:
+        background_tasks.add_task(
+            user_context_service.update_user_information,
+            user_id=user.id
+        )
+    
     # генерируем ответ от ИИ
     chat_settings = schemas.GenerateMessageSettings(
         model=model,
@@ -177,3 +188,22 @@ async def regenerate_message(
 async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     await crud.delete_chat(db, request.chat_id, user.id)
     return DeleteResponse()
+
+@router.post("/test-background", response_model=Dict[str, str])
+async def test_background(
+    message: str,
+    background_tasks: BackgroundTasks,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    """
+    Тестовый эндпоинт для проверки работы BackgroundTasks.
+    """
+    # Запускаем тестовую фоновую задачу
+    background_tasks.add_task(
+        user_context_service.test_background_task,
+        user_id=user.id,
+        message=message
+    )
+    
+    return {"status": "success", "message": "Тестовая фоновая задача запущена"}
