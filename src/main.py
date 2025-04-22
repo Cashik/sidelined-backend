@@ -1,6 +1,9 @@
 import sys
 import logging
 from datetime import datetime
+import os
+import asyncio
+from src.services.mcp_client_service import MCPClientService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,11 +64,37 @@ def get_db():
     finally:
         db.close()
 
+
+from mcp.types import ListToolsResult
+
+# Функция для вывода доступных инструментов MCP сервера
+async def list_mcp_tools():
+    return {"status": "success", "message": "Тестовая фоновая задача запущена"}
+    mcp_service = MCPClientService(
+        name="MCP",
+        description="MCP сервер",
+        url="http://thirdweb_mcp:8080/sse"
+    )
+    await mcp_service.initialize()
+    tools:ListToolsResult = await mcp_service.get_tools()
+    
+    
+    logger.info(f"tool 1 Data: {tools[1].name} {tools[1].description} {tools[1].inputSchema} {tools[1].model_config}")
+    
+    #result = await mcp_service.invoke_tool(tools.tools[1].name, {"message": "Hello, world!"})
+    #logger.info(f"result: {result}")
+
+
 # Подключаем роутеры
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(user.router)
 app.include_router(requirements.router)
+
+@app.on_event("startup")
+async def startup_event():
+    # Выводим список инструментов MCP при старте сервера
+    await list_mcp_tools()
 
 if __name__ == "__main__":
     import uvicorn

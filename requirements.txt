@@ -14,3 +14,7 @@ eth-account
 eth-utils
 alembic-postgresql-enum
 requests
+mcp
+langchain
+langchain[openai]
+langchain-google-genai

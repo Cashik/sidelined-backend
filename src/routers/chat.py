@@ -11,6 +11,10 @@ from src.config import settings
 from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
 from src.services import user_context_service
 
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
@@ -207,3 +211,65 @@ async def test_background(
     )
     
     return {"status": "success", "message": "Тестовая фоновая задача запущена"}
+
+
+class ToolsResponse(BaseModel):
+    toolboxes: List[schemas.Toolbox]
+    
+
+
+@router.get("/providers", response_model=ProvidersResponse)
+async def get_providers():
+    # TODO: добавить выключение моделей и сервисов
+    # TODO: добавить кеширование данного ответа
+    return ProvidersResponse(models=list(enums.Model))
+
+@router.get("/tools/standart/all", response_model=ToolsResponse)
+async def get_tools():
+    from src.services.mcp_client_service import MCPClientService
+    thirdweb_client = MCPClientService(
+        name="Thirdweb",
+        description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
+        url="http://thirdweb_mcp:8080/sse"
+    )
+    await thirdweb_client.initialize()
+    tools = await thirdweb_client.get_tools()
+    return ToolsResponse(toolboxes=[
+        schemas.Toolbox(
+            name=thirdweb_client.name,
+            description=thirdweb_client.description,
+            tools=tools
+        )
+    ])
+
+class CallToolRequest(BaseModel):
+    toolbox_name: str = "Thirdweb"
+    tool_name: str
+    input: Dict[str, Any]
+    
+class CallToolResponse(BaseModel):
+    result: Dict[str, Any]
+    
+@router.post("/tools/call", response_model=CallToolResponse)
+async def call_tool(request: CallToolRequest):
+    # validate toolbox name
+    if request.toolbox_name != "Thirdweb":
+        raise HTTPException(status_code=404, detail=f"Toolbox {request.toolbox_name} not found")
+    
+    from src.services.mcp_client_service import MCPClientService
+    thirdweb_client = MCPClientService(
+        name="Thirdweb",
+        description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
+        url="http://thirdweb_mcp:8080/sse"
+    )
+    await thirdweb_client.initialize()
+    tools = await thirdweb_client.get_tools()
+    
+    # validate tool name
+    if request.tool_name not in [tool.name for tool in tools]:
+        raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found")
+    
+    # Call a tool
+    result = await thirdweb_client.invoke_tool(request.tool_name, request.input)
+    logger.info(f"Tool {request.tool_name} called with input {request.input} and result {result}")
+    return CallToolResponse(result=result)

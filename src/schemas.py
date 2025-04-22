@@ -172,3 +172,12 @@ class RemoveFactsFunctionCall(FunctionCall):
 class GeneratedResponse(BaseModel):
     text: str
     function_calls: Optional[List[FunctionCall]] = None
+
+
+from mcp.types import Tool, ListToolsResult
+
+class Toolbox(BaseModel):
+    name: str
+    description: str
+    tools: List[Tool]
+
