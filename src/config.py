@@ -74,7 +74,6 @@ class Settings(BaseSettings):
     THIRDWEB_PRIVATE_KEY: str
     ALLOW_CHAT_WHEN_SERVER_IS_DOWN: bool = False
     
-    NEBULA_FUNCTIONALITY_ENABLED: bool = False
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Token requirements
@@ -107,7 +106,7 @@ class Settings(BaseSettings):
 
     @property
     def FUNCTIONALITY_ENABLED(self) -> bool:
-        return self.NEBULA_FUNCTIONALITY_ENABLED or self.FACTS_FUNCTIONALITY_ENABLED
+        return self.FACTS_FUNCTIONALITY_ENABLED
 
     model_config = ConfigDict(
         extra="allow",  # Allow additional fields

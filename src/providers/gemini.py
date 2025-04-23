@@ -7,9 +7,13 @@ from src.providers.base import AIProvider
 from src.config import settings
 from src.services.prompt_service import PromptService
 from src import enums, schemas
+from mcp import ClientSession
+from langchain_mcp_adapters.tools import load_mcp_tools
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import create_tool_calling_agent, AgentExecutor, create_react_agent
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)
@@ -23,34 +27,50 @@ class GeminiProvider(AIProvider):
     def __init__(self):
         pass
 
-    async def generate_response(self, prompt_service: PromptService) -> schemas.GeneratedResponse:
+    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
         logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
         logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
         
-        messages = []
-        system_prompt = prompt_service.generate_system_prompt()
-        messages.append(SystemMessage(content=system_prompt))
+        messages = prompt_service.generate_langchain_messages()
         
-        # Добавление сообщений из истории чата
-        for nonce in sorted(prompt_service.generate_data.chat.messages.keys()):
-            message = max(prompt_service.generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
-            if message.sender is enums.Role.USER:
-                messages.append(HumanMessage(content=message.content))
-            else:
-                messages.append(AIMessage(content=message.content))
-        
+
         logger.info(f"Sending request to Gemini with messages: {messages}")
         
-        model = init_chat_model(
+        prompt = ChatPromptTemplate.from_messages([
+            MessagesPlaceholder("chat_history"),
+            MessagesPlaceholder("agent_scratchpad")
+        ])
+
+        llm = init_chat_model(
             model=prompt_service.generate_data.chat_settings.model.value,
             model_provider="google_genai",
             api_key=settings.GEMINI_API_KEY
         )
         
-        response = model.invoke(messages)
+        tools = []
+        
+        # Если есть сессия MCP, загрузим инструменты
+        if mcp_session:
+            logger.info("MCP сессия доступна, загружаем инструменты MCP")
+            tools = await load_mcp_tools(mcp_session)
+
+        agent = create_tool_calling_agent(
+            llm=llm,
+            tools=tools,
+            prompt=prompt
+        )
+        
+        executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            max_iterations=10, #TODO: add max_iterations
+            verbose=settings.DEBUG
+        )
+        
+        response = await executor.ainvoke({"chat_history": messages})
         
         # Обработка ответа
-        answer_text = response.content if response.content else ""
+        answer_text = response["output"] if response["output"] else ""
         
         result = schemas.GeneratedResponse(
             text=answer_text,

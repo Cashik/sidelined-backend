@@ -1,57 +1,46 @@
 import logging
 from typing import List
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 
-from src import schemas
+from src import schemas, enums
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)
 
-NEBULA_FUNCTIONS_TEMPLATE = f"""
-2. Interaction of the user with the blockchain.  
-Nebula is an AI agent with access to blockchain data. You can interact with it to supplement the answer to the user.
-
-2.1 Data retrieval.  
-If the user asks a question related to obtaining blockchain data, simply forward this message to your colleague. Keep in mind that Nebula does not understand the context of your conversation with the user, so if necessary, you must modify the user's request.
-
-call nebula_ask(str)
-
-2.2 Creating a transaction.  
-Nebula can create a transaction for the user, which they will only need to sign. As with data retrieval, you need to ensure that Nebula has all the necessary context.
-
-call nebula_sign(str)
-
-Usage examples:  
-call nebula_ask("native or simplified user request")
-call nebula_sign("native or supplemented user request")
-"""
-
-
-# todo: add nebula tools
-nebula_tools = []
 
 class PromptService:
     def __init__(self, generate_data: schemas.AssistantGenerateData):
-        self.generate_data = generate_data
+        self.generate_data: schemas.AssistantGenerateData = generate_data
 
     def generate_system_prompt(self) -> str:
         # Системное сообщение (инструкции для модели)
         system_message = f"You are a helpful assistant."
         
+        system_message += f"\n#System information about user:"
         if self.generate_data.user.preferred_name or self.generate_data.user.user_context or self.generate_data.chat_settings.chat_style or self.generate_data.chat_settings.chat_details_level:
-            system_message += "\nUser preferences:"
+            system_message += "\n##User preferences and account information:"
             if self.generate_data.user.preferred_name:
                 system_message += f"""\n- want to be called as "{self.generate_data.user.preferred_name}"."""
             if self.generate_data.chat_settings.chat_style:
-                system_message += f"\n- wants to communicate in the following style: {self.generate_data.chat_settings.chat_style.value}."
+                system_message += f"\n- preferred chat style: {self.generate_data.chat_settings.chat_style.value}."
             if self.generate_data.chat_settings.chat_details_level:
-                system_message += f"\n- wants your answers to be as detailed as this: {self.generate_data.chat_settings.chat_details_level.value}."
+                system_message += f"\n- desired level of detail in your answers: {self.generate_data.chat_settings.chat_details_level.value}."
             if self.generate_data.user.user_context:
                 system_message += f"\nUser added some information about himself: \n{self.generate_data.user.user_context}."
 
             system_message += "\n"
         
-        system_message += "\nUse language that user uses in his messages.\n"
+        if self.generate_data.user.addresses:
+            system_message += f"\n##User web3 information:"
+            if self.generate_data.user.selected_address:
+                system_message += f"\nUser current address: {self.generate_data.user.selected_address}. Use it for if user do not specify another address."
+            other_addresses = [address for address in self.generate_data.user.addresses if address != self.generate_data.user.selected_address]
+            if other_addresses:
+                system_message += f"\nAll user connected addresses:" + ", ".join([f'"{address}"' for address in other_addresses])
+        
+        system_message += "\nFor all tools you must use Base network(chain_id: 8453)."
+        system_message += "\nFor response use language that user uses in his messages.\n"
         
         if settings.FUNCTIONALITY_ENABLED:
             if settings.FACTS_FUNCTIONALITY_ENABLED:
@@ -65,17 +54,24 @@ class PromptService:
                 else:
                     system_message += "\nList is empty."
 
-            if settings.NEBULA_FUNCTIONALITY_ENABLED:
-                system_message += f"\n{NEBULA_FUNCTIONS_TEMPLATE}"
-        
         logger.info(f"System message: {system_message}")
         return system_message
     
-    def get_available_tools(self) -> List[dict]:
-        available_tools = []
-        if settings.FACTS_FUNCTIONALITY_ENABLED:
-            available_tools.extend(facts_tools)
-        if settings.NEBULA_FUNCTIONALITY_ENABLED:
-            available_tools.extend(nebula_tools)
-        return available_tools
-
+    def generate_langchain_messages(self) -> list[BaseMessage]:
+        messages = []
+        system_prompt = self.generate_system_prompt()
+        messages.append(SystemMessage(content=system_prompt))
+        
+        # Добавление сообщений из истории чата
+        for nonce in sorted(self.generate_data.chat.messages.keys()):
+            message = max(self.generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
+            if message.sender is enums.Role.USER:
+                messages.append(HumanMessage(content=message.content))
+            elif message.sender is enums.Role.ASSISTANT:
+                messages.append(AIMessage(content=message.content))
+            elif message.sender is enums.Role.SYSTEM:
+                messages.append(SystemMessage(content=message.content))
+            else:
+                logger.error(f"Unknown message sender: {message.sender}")
+                pass
+        return messages

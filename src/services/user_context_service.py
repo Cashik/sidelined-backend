@@ -182,6 +182,7 @@ def create_system_prompt(user: models.User, messages_to_analyze: List[models.Mes
     Not important information:
     - not important notes like "love sosiges with mayonez" or "user is a good person"
     - events or facts that are not important for future conversations like "user walks 5 km today" or "user see a new movie yesterday"
+    - user's wallet addresses (because they are controlled by user and can be changed)
     
     Exaples of good and bad notes:
     - bad: "user like to listens rock music"
@@ -192,7 +193,6 @@ def create_system_prompt(user: models.User, messages_to_analyze: List[models.Mes
     - good: "Alex - friend", "Alex is a bully"
     - bad: "user has a girlfriend Marina who is a doctor"
     - good: "girlfriend Marina", "Marina is a doctor"
-
 
     EXISTING NOTES ABOUT USER(id - note text):
     {notes_text}

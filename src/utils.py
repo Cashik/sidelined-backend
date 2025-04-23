@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from src import schemas, enums, models, exceptions, crud
 from src.config import settings
-from src.services import thirdweb_service
+from src.services.mcp_client_service import MCPClientService
+from src.services.thirdweb_service import ThirdwebService
 from src.services.prompt_service import PromptService
 from src.providers import openai, gemini
 
@@ -119,14 +120,31 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         prompt_service = PromptService(generate_data)
         logger.info(f"Setting up AI provider ...")
         logger.info(f"Model: {generate_data.chat_settings.model} model value: {generate_data.chat_settings.model.value} gemini value: {enums.Model.GEMINI_2_FLASH.value}")
+         
+        # Выбираем AI провайдера
         if generate_data.chat_settings.model in (enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI) and settings.OPENAI_API_KEY:
             ai_provider = openai.OpenAIProvider()
         elif generate_data.chat_settings.model in (enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO) and settings.GEMINI_API_KEY:
             ai_provider = gemini.GeminiProvider()
         else:
             raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
-        logger.info(f"Generating response ...")
-        provider_answer: schemas.GeneratedResponse = await ai_provider.generate_response(prompt_service)
+        
+        # Инициализируем MCP клиент
+        mcp_client = MCPClientService(
+            name="Thirdweb",
+            description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
+            url="http://thirdweb_mcp:8080/sse"
+        )
+        
+        # Генерируем ответ, используя MCP сессию
+        async with mcp_client.get_session() as mcp_session:
+            logger.info(f"Generating response with MCP tools ...")
+            provider_answer: schemas.GeneratedResponse = await ai_provider.generate_response(
+                prompt_service, 
+                mcp_session
+            )
+
+            
         logger.info(f"Response generated: {provider_answer}")
         
         
@@ -242,7 +260,7 @@ async def check_user_access(user: models.User) -> bool:
     required_chain_ids = {req.token.chain_id.value for req in settings.TOKEN_REQUIREMENTS}
     
     # Создаем экземпляр сервиса Thirdweb
-    thirdweb = thirdweb_service.ThirdwebService(
+    thirdweb = ThirdwebService(
         app_id=settings.THIRDWEB_APP_ID,
         private_key=settings.THIRDWEB_PRIVATE_KEY
     )

@@ -118,6 +118,7 @@ class MessageCreate(BaseModel):
     model: Optional[enums.Model] = None
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
+    selected_address: Optional[str] = None
     
 class ChatSummary(BaseModel):
     id: int
@@ -148,6 +149,8 @@ class UserProfileData(BaseModel):
     preferred_name: Optional[str] = None
     user_context: Optional[str] = None
     facts: List[FactAboutUser]
+    addresses: Optional[List[str]] = None
+    selected_address: Optional[str] = None
     
 class AssistantGenerateData(BaseModel):
     user: UserProfileData

@@ -1,15 +1,16 @@
 # providers/base.py
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 from src.services.prompt_service import PromptService
 from src import schemas 
+from mcp import ClientSession
 
 class AIProvider(ABC):
     def __init__(self):
         pass
     
     @abstractmethod
-    async def generate_response(self, prompt_service: PromptService) -> str:
+    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
         raise NotImplementedError()
     
     @abstractmethod

@@ -18,3 +18,4 @@ mcp
 langchain
 langchain[openai]
 langchain-google-genai
+langchain-mcp-adapters

@@ -41,6 +41,7 @@ class RegenerateMessageRequest(BaseModel):
     model: Optional[enums.Model] = None
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
+    selected_address: Optional[str] = None
 
 class ChatDeleteRequest(BaseModel):
     chat_id: int
@@ -115,10 +116,13 @@ async def create_message(
         description=fact.description,
         created_at=fact.created_at,
     ) for fact in user.facts]
+    user_addresses:List[str] = [address.address for address in user.wallet_addresses]
     user_profile_data = schemas.UserProfileData(
         preferred_name=user.preferred_name,
         user_context=user.user_context,
         facts=user_facts,
+        addresses=user_addresses,
+        selected_address=create_message_request.selected_address,
     )
     assistant_generate_data = schemas.AssistantGenerateData(
         user=user_profile_data,
@@ -167,10 +171,13 @@ async def regenerate_message(
         description=fact.description,
         created_at=fact.created_at,
     ) for fact in user.facts]
+    user_addresses:List[str] = [address.address for address in user.wallet_addresses]
     user_profile_data = schemas.UserProfileData(
         preferred_name=user.preferred_name,
         user_context=user.user_context,
         facts=user_facts,
+        addresses=user_addresses,
+        selected_address=request.selected_address,
     )
     chat_settings = schemas.GenerateMessageSettings(
         model=model,

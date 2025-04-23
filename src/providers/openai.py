@@ -2,94 +2,72 @@ from openai import OpenAI
 import logging
 from pydantic import BaseModel
 from typing import List, Optional, Any
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain.agents import AgentExecutor, create_openai_tools_agent, create_react_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp import ClientSession
 
 from src.providers.base import AIProvider
 from src.config import settings
 from src.services.prompt_service import PromptService
 from src import schemas, enums
 
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)
 
-# Определение функций для работы с заметками
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "notes_add",
-            "description": "Add new notes about the user.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "new_notes": {
-                        "type": "array",
-                        "description": "Each note should be short and concise.",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "required": ["new_notes"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "notes_remove",
-            "description": "Delete wrong or unactual notes from list.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ids": {
-                        "type": "array",
-                        "description": "List of valid IDs from the list of notes to delete",
-                        "items": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "required": ["ids"]
-            }
-        }
-    }
-]
 
 class OpenAIProvider(AIProvider):
     def __init__(self):
         pass
 
-    async def generate_response(self, prompt_service: PromptService) -> schemas.GeneratedResponse:
+    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
         logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
         logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
         
-        messages = []
-        system_prompt = prompt_service.generate_system_prompt()
-        messages.append(SystemMessage(content=system_prompt))
-        
-        # Добавление сообщений из истории чата
-        for nonce in sorted(prompt_service.generate_data.chat.messages.keys()):
-            message = max(prompt_service.generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
-            if message.sender is enums.Role.USER:
-                messages.append(HumanMessage(content=message.content))
-            else:
-                messages.append(AIMessage(content=message.content))
+        messages = prompt_service.generate_langchain_messages()
         
         logger.info(f"Sending request to OpenAI with messages: {messages}")
         
-        model = init_chat_model(
+        prompt = ChatPromptTemplate.from_messages([
+            MessagesPlaceholder("chat_history"),
+            MessagesPlaceholder("agent_scratchpad")
+        ])
+
+        llm = init_chat_model(
             model=prompt_service.generate_data.chat_settings.model.value,
             model_provider="openai",
             api_key=settings.OPENAI_API_KEY
         )
         
-        response = model.invoke(messages)
+        tools = []
+        
+        # Если есть сессия MCP, загрузим инструменты
+        if mcp_session:
+            logger.info("MCP сессия доступна, загружаем инструменты MCP")
+            tools = await load_mcp_tools(mcp_session)
+            
+
+        agent = create_openai_tools_agent(
+            llm=llm,
+            tools=tools,
+            prompt=prompt
+        )
+            
+        executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            max_iterations=10, #TODO: add max_iterations
+            verbose=settings.DEBUG
+        )
+        
+        response = await executor.ainvoke({"chat_history": messages})
         
         # Обработка ответа
-        answer_text = response.content if response.content else ""
+        answer_text = response["output"] if response["output"] else ""
         
         result = schemas.GeneratedResponse(
             text=answer_text,
