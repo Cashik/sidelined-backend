@@ -229,32 +229,50 @@ async def check_user_access(user_address: str, user_chain_id: int) -> bool:
     """
     Проверка баланса пользователя в Thirdweb
     """
-    # для начала отсеиваем все требования по цепочкам, кроме той, что указана в user_chain_id
-    requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.chain_id.value == user_chain_id]
+    # не отсеиваем ничего, проверяем все требования
+    erc20_requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.interface == enums.TokenInterface.ERC20]
+    erc721_requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.interface == enums.TokenInterface.ERC721]
     
-    if not requirements:
+    if not erc20_requirements and not erc721_requirements:
         return False
     
     # какие-то требования остались, значит нужно проверить балансы
-    
     thirdweb = thirdweb_service.ThirdwebService(
         app_id=settings.THIRDWEB_APP_ID,
         private_key=settings.THIRDWEB_PRIVATE_KEY
     )
     
-    # получаем балансы всех токенов
+    # получаем балансы ERC721 токенов
     try:
-        balances: list[thirdweb_service.TokenBalance] = await thirdweb.get_balances(user_address, user_chain_id, enums.TokenInterface.ERC20)
+        erc721_chain_ids = list(set([req.token.chain_id.value for req in erc721_requirements]))
+        balances: list[thirdweb_service.TokenBalance] = await thirdweb.get_ERC721_balances(user_address, erc721_chain_ids)
+    except exceptions.ThirdwebServiceException:
+        return settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN
+    
+    
+    # далее проходим по всем требованиям и проверяем баланс
+    for req in erc721_requirements:
+        for balance in balances:
+            if balance.address_lower == req.token.address.lower() and balance.chain_id == req.token.chain_id.value:
+                actual_balance = balance.balance
+                if actual_balance >= req.balance:
+                    return True
+                
+    # получаем балансы ERC20 токенов
+    try:
+        erc20_chain_ids = list(set([req.token.chain_id.value for req in erc20_requirements]))
+        balances: list[thirdweb_service.TokenBalance] = await thirdweb.get_ERC20_balances(user_address, erc20_chain_ids)
     except exceptions.ThirdwebServiceException:
         return settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN
     
     # далее проходим по всем требованиям и проверяем баланс
-    for req in requirements:
+    for req in erc20_requirements:
         for balance in balances:
-            if balance.address_lower == req.token.address.lower() and balance.chain_id == user_chain_id:
+            if balance.address_lower == req.token.address.lower() and balance.chain_id == req.token.chain_id.value:
                 actual_balance = balance.balance//(10**req.token.decimals)
                 if actual_balance >= req.balance:
                     return True
+                
     
     # ничего не подошло, значит баланс не соответствует ни одному требованию
     return False

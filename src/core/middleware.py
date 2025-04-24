@@ -113,10 +113,6 @@ async def get_optional_user(
         return None
     
 
-
-
-
-
 async def check_balance_and_update_token(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     response: Response = None

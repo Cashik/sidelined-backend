@@ -36,6 +36,7 @@ class ChatDetailsLevel(Enum):
 class ChainID(Enum):
     ETHEREUM = 1
     BASE = 8453
+    ARBITRUM = 42161
 
 class TokenInterface(Enum):
     ERC20 = "erc20"
