@@ -57,10 +57,18 @@ class PromptService:
         logger.info(f"System message: {system_message}")
         return system_message
     
-    def generate_langchain_messages(self) -> list[BaseMessage]:
+    def generate_langchain_messages(self, avoid_system_role: bool = False) -> list[BaseMessage]:
+        """
+        If avoid_system_role is True, system role will be added as human message. 
+        This is useful for some old models that do not support system role.
+        """
         messages = []
         system_prompt = self.generate_system_prompt()
-        messages.append(SystemMessage(content=system_prompt))
+        if avoid_system_role:
+            messages.append(HumanMessage(content="System: " + system_prompt))
+        else:
+            messages.append(SystemMessage(content=system_prompt))
+            
         
         # Добавление сообщений из истории чата
         for nonce in sorted(self.generate_data.chat.messages.keys()):
@@ -70,7 +78,10 @@ class PromptService:
             elif message.sender is enums.Role.ASSISTANT:
                 messages.append(AIMessage(content=message.content))
             elif message.sender is enums.Role.SYSTEM:
-                messages.append(SystemMessage(content=message.content))
+                if avoid_system_role:
+                    messages.append(HumanMessage(content="System: " + message.content))
+                else:
+                    messages.append(SystemMessage(content=message.content))
             else:
                 logger.error(f"Unknown message sender: {message.sender}")
                 pass

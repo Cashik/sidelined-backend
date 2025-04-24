@@ -24,7 +24,7 @@ class OpenAIProvider(AIProvider):
     def __init__(self):
         pass
 
-    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
+    async def generate_response(self, prompt_service: PromptService, tools: List[schemas.Tool] = []) -> schemas.GeneratedResponse:
         logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
         logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
         
@@ -43,14 +43,6 @@ class OpenAIProvider(AIProvider):
             api_key=settings.OPENAI_API_KEY
         )
         
-        tools = []
-        
-        # Если есть сессия MCP, загрузим инструменты
-        if mcp_session:
-            logger.info("MCP сессия доступна, загружаем инструменты MCP")
-            tools = await load_mcp_tools(mcp_session)
-            
-
         agent = create_openai_tools_agent(
             llm=llm,
             tools=tools,

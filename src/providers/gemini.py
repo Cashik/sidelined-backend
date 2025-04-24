@@ -27,11 +27,13 @@ class GeminiProvider(AIProvider):
     def __init__(self):
         pass
 
-    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
+    async def generate_response(self, prompt_service: PromptService, tools: List[schemas.Tool] = []) -> schemas.GeneratedResponse:
         logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
         logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
         
-        messages = prompt_service.generate_langchain_messages()
+        avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_FLASH.value]
+        logger.info(f"Avoid system role: {avoid_system_role}")
+        messages = prompt_service.generate_langchain_messages(avoid_system_role)
         
 
         logger.info(f"Sending request to Gemini with messages: {messages}")
@@ -47,12 +49,6 @@ class GeminiProvider(AIProvider):
             api_key=settings.GEMINI_API_KEY
         )
         
-        tools = []
-        
-        # Если есть сессия MCP, загрузим инструменты
-        if mcp_session:
-            logger.info("MCP сессия доступна, загружаем инструменты MCP")
-            tools = await load_mcp_tools(mcp_session)
 
         agent = create_tool_calling_agent(
             llm=llm,

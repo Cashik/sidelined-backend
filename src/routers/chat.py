@@ -277,6 +277,7 @@ async def call_tool(request: CallToolRequest):
         raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found")
     
     # Call a tool
+    logger.info(f"Calling tool {request.tool_name} with input {request.input}")
     result = await thirdweb_client.invoke_tool(request.tool_name, request.input)
     logger.info(f"Tool {request.tool_name} called with input {request.input} and result {result}")
     return CallToolResponse(result=result)

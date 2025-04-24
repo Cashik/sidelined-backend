@@ -7,6 +7,8 @@ import logging
 import openai
 from openai import OpenAI
 from sqlalchemy.orm import Session
+from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
+
 
 from src import schemas, enums, models, exceptions, crud
 from src.config import settings
@@ -129,19 +131,23 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         else:
             raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
         
-        # Инициализируем MCP клиент
-        mcp_client = MCPClientService(
-            name="Thirdweb",
-            description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
-            url="http://thirdweb_mcp:8080/sse"
-        )
+        
+        mcp_servers = {
+            "thirdweb": {
+                "url": "http://thirdweb_mcp:8080/sse",
+                "transport": "sse",
+            }
+        }
+        
+        mcp_multi_client = MultiServerMCPClient(mcp_servers)
         
         # Генерируем ответ, используя MCP сессию
-        async with mcp_client.get_session() as mcp_session:
+        async with mcp_multi_client as mcp_session:
             logger.info(f"Generating response with MCP tools ...")
+            tools = mcp_session.get_tools()
             provider_answer: schemas.GeneratedResponse = await ai_provider.generate_response(
                 prompt_service, 
-                mcp_session
+                tools
             )
 
             

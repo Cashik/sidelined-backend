@@ -10,7 +10,7 @@ class AIProvider(ABC):
         pass
     
     @abstractmethod
-    async def generate_response(self, prompt_service: PromptService, mcp_session: Optional[ClientSession] = None) -> schemas.GeneratedResponse:
+    async def generate_response(self, prompt_service: PromptService, tools: Optional[List[schemas.Tool]] = None) -> schemas.GeneratedResponse:
         raise NotImplementedError()
     
     @abstractmethod
