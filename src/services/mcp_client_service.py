@@ -4,49 +4,35 @@ from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 from mcp import ClientSession, types
 from mcp.client.sse import sse_client
-
+from mcp.client.websocket import websocket_client
 from src import schemas
 
 logger = logging.getLogger(__name__)
 
-class MCPClientService:
+class MCPClient:
+    def __init__(self, server: schemas.MCPServer):
+        self.server = server
 
-    def __init__(self, server: schemas.MCPSSEServer):
-        self.name = server.name
-        self.description = server.description
-        self.url = server.url
-        self.transport = server.transport
-        self._tools: List[types.Tool] = []
-        
-        logger.info(f"Инициализация MCP клиента. {self.name} - {self.description} - {self.url}")
-    
-    async def initialize(self):
-        """Инициализирует клиент и получает список инструментов"""
-        async with sse_client(url=self.url) as (read, write):
-            async with ClientSession(
-                read, write
-            ) as session:
-                # Initialize the connection
-                await session.initialize()
-
-                # List available tools
-                self._tools = (await session.list_tools()).tools
-
-                print(f"Successfully initialized MCP client. Tools: {self._tools}")
-    
     @asynccontextmanager
     async def get_session(self):
-        """Предоставляет активную сессию MCP для работы с инструментами"""
-        async with sse_client(url=self.url) as (read, write):
-            async with ClientSession(read, write) as session:
-                # Initialize the connection
-                await session.initialize()
-                logger.info(f"Successfully initialized MCP client session")
-                yield session
-                
+        if self.server.transport == "sse":
+            async with sse_client(url=self.server.url) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    yield session
+        elif self.server.transport == "websocket":
+            async with websocket_client(url=self.server.url) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    yield session
+        else:
+            raise NotImplementedError(f"Transport {self.server.transport} is not implemented")
+    
     async def get_tools(self) -> List[types.Tool]:
-        """Получить список доступных инструментов"""
-        return self._tools
+        async with self.get_session() as session:
+            self._tools = (await session.list_tools()).tools
+            logger.info(f"Successfully got tools: {self._tools}")
+            return self._tools
     
     async def invoke_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Вызвать инструмент с заданными параметрами"""
@@ -61,5 +47,8 @@ class MCPClientService:
                     return {"text": result.content[0].text}
                 else:
                     return {"text": "Unsupported content type received from MCP"}
+
+    
+
 
 

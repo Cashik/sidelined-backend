@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     
     # App settings
     SECRET_KEY: str = "your-secret-key"
-    DEBUG: bool = False
+    DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
     
     # JWT settings

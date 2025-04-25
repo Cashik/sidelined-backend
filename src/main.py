@@ -71,6 +71,11 @@ app.include_router(user.router)
 app.include_router(requirements.router)
 
 
+@app.on_event("startup")
+async def startup_event():
+    import src.mcp_servers
+    await src.mcp_servers.sync_toolboxes()
+
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting server at {settings.HOST}:{settings.PORT}")

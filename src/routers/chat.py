@@ -233,16 +233,64 @@ async def get_providers():
 
 @router.get("/tools/standart/all", response_model=ToolsResponse)
 async def get_tools():
-    from src.mcp_servers import mcp_servers as mcp_servers_list
-    from langchain_mcp_adapters.client import MultiServerMCPClient
-    
-    toolboxes = []
-    for server in mcp_servers_list:
-        toolboxes.append(schemas.Toolbox(
-            name=server.name,
-            description=server.description,
-            tools=[]
-        ))
-    
-    return ToolsResponse(toolboxes=toolboxes)
+    # Сейчас каждый инстанс сервера будет иметь свой набор и получать его отдельно
+    # ПРостое кеширование не избавит от лишних запросов при старте инстанса
+    from src.mcp_servers import get_toolboxes
+    result = await get_toolboxes()
+    return ToolsResponse(toolboxes=result)
 
+class CallToolRequest(BaseModel):
+    toolbox_name: str = "Thirdweb"
+    tool_name: str
+    input: Dict[str, Any]
+    
+class CallToolResponse(BaseModel):
+    success: bool = True
+    result: Dict[str, Any] | None = None
+    as_message: str | None = None
+    execution_time: float | None = None
+    
+@router.post("/tools/call", response_model=CallToolResponse)
+async def call_tool(request: CallToolRequest):
+    # Получаем доступные тулбоксы
+    from src.mcp_servers import get_toolboxes
+    toolboxes = await get_toolboxes()
+    
+    # Валидируем наличие тулбокса
+    toolbox = next((tb for tb in toolboxes if tb.name == request.toolbox_name), None)
+    if not toolbox:
+        raise HTTPException(status_code=404, detail=f"Toolbox {request.toolbox_name} not found")
+    
+    # Валидируем наличие тула в тулбоксе
+    if request.tool_name not in [tool.name for tool in toolbox.tools]:
+        raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found in toolbox {request.toolbox_name}")
+    
+    # Получаем сервер для выбранного тулбокса
+    from src.mcp_servers import mcp_servers
+    server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
+    if not server:
+        raise HTTPException(status_code=500, detail=f"Server configuration for {request.toolbox_name} not found")
+    
+    # Инициализируем клиент MCP
+    from src.services.mcp_client_service import MCPClient
+    logger.info(f"Initializing MCP client for {request.toolbox_name}")
+    mcp_client = MCPClient(server)
+    
+    # Вызываем тул
+    try:
+        logger.info(f"Calling tool {request.tool_name} with input {request.input}")
+        import time
+        start_time = time.time()
+        
+        result = await mcp_client.invoke_tool(request.tool_name, request.input)
+        
+        execution_time = time.time() - start_time
+        logger.info(f"Tool {request.tool_name} called successfully in {execution_time:.2f} seconds")
+        
+        return CallToolResponse(
+            result=result,
+            execution_time=execution_time
+        )
+    except Exception as e:
+        logger.error(f"Error calling tool {request.tool_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calling tool: {str(e)}")
