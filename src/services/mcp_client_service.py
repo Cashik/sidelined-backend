@@ -30,8 +30,8 @@ class MCPClient:
     
     async def get_tools(self) -> List[types.Tool]:
         async with self.get_session() as session:
+            
             self._tools = (await session.list_tools()).tools
-            logger.info(f"Successfully got tools: {self._tools}")
             return self._tools
     
     async def invoke_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
