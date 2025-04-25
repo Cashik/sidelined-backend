@@ -27,6 +27,17 @@ requirements = [
         ),
         balance=1000
     ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.ARBITRUM,
+            address="0x78bDE7b6C7eB8f5F1641658c698fD3BC49738367",
+            interface=enums.TokenInterface.ERC721,
+            decimals=0,
+            symbol="ZNL",
+            name="ZNodeLicense"
+        ),
+        balance=1
+    )
 ]
 
 
@@ -89,9 +100,9 @@ class Settings(BaseSettings):
     @validator('TOKEN_REQUIREMENTS')
     def validate_token_requirements(cls, v):
         for req in v:
-            if req.token.interface != enums.TokenInterface.ERC20:
+            if req.token.interface not in [enums.TokenInterface.ERC20, enums.TokenInterface.ERC721]:
                 raise NotImplementedError(
-                    f"Currently only ERC20 tokens are supported. "
+                    f"Currently only ERC20 and ERC721 tokens are supported. "
                     f"Found {req.token.interface.value} interface in configuration."
                 )
         return v

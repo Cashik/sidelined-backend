@@ -20,3 +20,4 @@ langchain[openai]
 langchain-google-genai
 langchain-mcp-adapters
 smithery
+jsonschema

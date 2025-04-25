@@ -12,6 +12,10 @@ from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
 from src.services import user_context_service
 
 import logging
+import json
+import jsonschema
+from jsonschema import validate, ValidationError
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -262,8 +266,16 @@ async def call_tool(request: CallToolRequest):
         raise HTTPException(status_code=404, detail=f"Toolbox {request.toolbox_name} not found")
     
     # Валидируем наличие тула в тулбоксе
-    if request.tool_name not in [tool.name for tool in toolbox.tools]:
+    tool = next((tool for tool in toolbox.tools if tool.name == request.tool_name), None)
+    if not tool:
         raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found in toolbox {request.toolbox_name}")
+    
+    # Валидируем входные параметры на основе схемы
+    try:
+        validate_tool_input(tool.inputSchema, request.input)
+    except ValidationError as e:
+        logger.error(f"Validation error for tool {request.tool_name}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid input parameters: {str(e)}")
     
     # Получаем сервер для выбранного тулбокса
     from src.mcp_servers import mcp_servers
@@ -292,5 +304,62 @@ async def call_tool(request: CallToolRequest):
             execution_time=execution_time
         )
     except Exception as e:
-        logger.error(f"Error calling tool {request.tool_name}: {str(e)}")
+        logger.error(f"Error calling tool {request.tool_name}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error calling tool: {str(e)}")
+
+def validate_tool_input(schema, input_data):
+    """
+    Валидирует входные параметры инструмента на основе его JSON-схемы.
+    Конвертирует типы данных в соответствии со схемой.
+    
+    Args:
+        schema (dict): JSON-схема инструмента
+        input_data (dict): Входные параметры
+        
+    Raises:
+        ValidationError: если параметры не соответствуют схеме
+    """
+    # Создаём копию входных данных для конвертации
+    converted_data = input_data.copy()
+    
+    # Проверяем, что все обязательные параметры присутствуют
+    if "required" in schema:
+        for param in schema["required"]:
+            if param not in input_data:
+                raise ValidationError(f"Missing required parameter: {param}")
+    
+    # Конвертируем типы в соответствии со схемой
+    if "properties" in schema:
+        for param_name, param_data in input_data.items():
+            if param_name in schema["properties"]:
+                param_schema = schema["properties"][param_name]
+                if "type" in param_schema:
+                    if param_schema["type"] == "number" or param_schema["type"] == "integer":
+                        try:
+                            # Преобразуем строку в число если нужно
+                            if isinstance(param_data, str):
+                                if param_schema["type"] == "integer":
+                                    converted_data[param_name] = int(param_data)
+                                else:
+                                    converted_data[param_name] = float(param_data)
+                        except ValueError:
+                            raise ValidationError(f"Parameter {param_name} must be a {param_schema['type']}")
+                    elif param_schema["type"] == "boolean" and isinstance(param_data, str):
+                        # Преобразуем строковые 'true'/'false' в boolean
+                        if param_data.lower() == 'true':
+                            converted_data[param_name] = True
+                        elif param_data.lower() == 'false':
+                            converted_data[param_name] = False
+    
+    # Проверяем дополнительные свойства
+    if schema.get("additionalProperties") is False:
+        for param in input_data:
+            if param not in schema.get("properties", {}):
+                raise ValidationError(f"Unknown parameter: {param}")
+    
+    # Выполняем полную валидацию схемы с преобразованными данными
+    validate(instance=converted_data, schema=schema)
+    
+    # Обновляем исходные данные преобразованными значениями
+    input_data.clear()
+    input_data.update(converted_data)
