@@ -34,7 +34,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         logger.info(f"Configuring prompt service ...")
         prompt_service = PromptService(generate_data)
         logger.info(f"Setting up AI provider ...")
-        logger.info(f"Model: {generate_data.chat_settings.model} model value: {generate_data.chat_settings.model.value} gemini value: {enums.Model.GEMINI_2_FLASH.value}")
+        logger.info(f"Model: {generate_data.chat_settings.model}")
          
         # Выбираем AI провайдера
         if generate_data.chat_settings.model in (enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI) and settings.OPENAI_API_KEY:
