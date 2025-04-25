@@ -30,6 +30,8 @@ requirements = [
 ]
 
 
+
+
 class Settings(BaseSettings):
     # Server settings
     HOST: str = "0.0.0.0"
@@ -80,6 +82,10 @@ class Settings(BaseSettings):
     TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60 # default 4 hours
     
+    # MCP Servers and tools API keys
+    SMITHERY_API_KEY: str | None = None
+    EXA_SEARCH_API_KEY: str | None = None
+    
     @validator('TOKEN_REQUIREMENTS')
     def validate_token_requirements(cls, v):
         for req in v:
@@ -123,6 +129,7 @@ class Settings(BaseSettings):
             "access_token_expire_minutes": self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES,
             "refresh_token_expire_days": self.JWT_REFRESH_TOKEN_EXPIRE_DAYS
         }
+
 
 @lru_cache()
 def get_settings():

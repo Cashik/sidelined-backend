@@ -12,105 +12,18 @@ from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
 
 from src import schemas, enums, models, exceptions, crud
 from src.config import settings
-from src.services.mcp_client_service import MCPClientService
 from src.services.thirdweb_service import ThirdwebService
 from src.services.prompt_service import PromptService
 from src.providers import openai, gemini
+from src.mcp_servers import mcp_servers as mcp_servers_list
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-
-
-
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
-
-
-async def handle_agent_functions(raw_message: str, user_id: int, db: Session) -> schemas.AgentFunctionCallingResult:
-    """Обработка команд в тексте"""
-    logger.info(f"Raw message: {raw_message}")
-    # Найти все команды в тексте
-    commands = re.findall(r'call\s+(\w+)\((.*?)\)', raw_message)
-    messages = []
-    
-    # Инициализация сервиса Thirdweb
-    thirdweb = thirdweb_service.ThirdwebService(
-        app_id=settings.THIRDWEB_APP_ID,
-        private_key=settings.THIRDWEB_PRIVATE_KEY
-    )
-    
-    for command in commands:
-        function_name = command[0]
-        args = command[1]
-        
-        if function_name == "nebula_ask" and settings.NEBULA_FUNCTIONALITY_ENABLED:
-            try:
-                # Извлекаем строку из аргументов
-                message = args.strip('"').strip("'")
-                # Создаем запрос к Nebula
-                request = thirdweb_service.NebulaChatRequest(message=message)
-                # Получаем ответ
-                response = await thirdweb.nebula_chat(request)
-                messages.append(schemas.SystemMessage(
-                    message=f"Nebula:\n {response.message}"
-                ))
-            except Exception as e:
-                logger.error(f"Error asking Nebula: {e}")
-                messages.append(schemas.SystemMessage(
-                    message=f"Error asking Nebula: {str(e)}"
-                ))
-        elif function_name == "add_facts" and settings.FACTS_FUNCTIONALITY_ENABLED:
-            try:
-                # Пробуем более гибкий парсинг аргументов
-                facts_arg = args.strip()
-                if facts_arg.startswith('[') and facts_arg.endswith(']'):
-                    # Обработка аргументов в формате строкового представления списка
-                    # Сначала пробуем стандартный json.loads
-                    try:
-                        facts = json.loads(facts_arg)
-                    except json.JSONDecodeError:
-                        # Если стандартный парсинг не сработал, пробуем извлечь элементы списка вручную
-                        # Извлекаем строки между кавычками и очищаем их от пробелов
-                        facts = []
-                        # Ищем все строки в кавычках (одинарных или двойных)
-                        items = re.findall(r'[\'"]([^\'"]*)[\'"]', facts_arg)
-                        for item in items:
-                            facts.append(item.strip())
-                else:
-                    # Если передана одна строка без скобок списка, упаковываем её в список
-                    facts = [facts_arg.strip("'").strip('"')]
-                
-                await crud.add_user_facts(user_id, facts, db)
-            except Exception as e:
-                logger.error(f"Error adding facts: {e}")
-                messages.append(schemas.SystemMessage(
-                    message=f"Error adding facts: {str(e)}"
-                ))
-        elif function_name == "del_facts" and settings.FACTS_FUNCTIONALITY_ENABLED:
-            try:
-                ids: list[int] = json.loads(args)
-                await crud.delete_user_facts(user_id, ids, db)
-            except Exception as e:
-                logger.error(f"Error removing facts: {e}")
-                messages.append(schemas.SystemMessage(
-                    message=f"Error removing facts: {str(e)}"
-                ))
-        else:
-            messages.append(schemas.SystemMessage(
-                message=f"dev: agent called function {function_name} with arguments {args}"
-            ))
-    
-    # Удаляем команды вместе с переносами строк
-    edited_raw_message = re.sub(r'\n\s*call\s+(\w+)\((.*?)\)', '', raw_message)
-    
-    return schemas.AgentFunctionCallingResult(
-        success=True,
-        new_messages=messages,
-        edited_raw_message=edited_raw_message
-    )
 
 
 async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.Message]:
@@ -131,13 +44,13 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         else:
             raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
         
-        
-        mcp_servers = {
-            "thirdweb": {
-                "url": "http://thirdweb_mcp:8080/sse",
-                "transport": "sse",
+        mcp_servers = {}
+        for server in mcp_servers_list:
+            mcp_server = {
+                "url": server.url,
+                "transport": server.transport
             }
-        }
+            mcp_servers[server.name] = mcp_server
         
         mcp_multi_client = MultiServerMCPClient(mcp_servers)
         

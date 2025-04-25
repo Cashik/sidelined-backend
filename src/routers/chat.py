@@ -233,51 +233,16 @@ async def get_providers():
 
 @router.get("/tools/standart/all", response_model=ToolsResponse)
 async def get_tools():
-    from src.services.mcp_client_service import MCPClientService
-    thirdweb_client = MCPClientService(
-        name="Thirdweb",
-        description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
-        url="http://thirdweb_mcp:8080/sse"
-    )
-    await thirdweb_client.initialize()
-    tools = await thirdweb_client.get_tools()
-    return ToolsResponse(toolboxes=[
-        schemas.Toolbox(
-            name=thirdweb_client.name,
-            description=thirdweb_client.description,
-            tools=tools
-        )
-    ])
+    from src.mcp_servers import mcp_servers as mcp_servers_list
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    
+    toolboxes = []
+    for server in mcp_servers_list:
+        toolboxes.append(schemas.Toolbox(
+            name=server.name,
+            description=server.description,
+            tools=[]
+        ))
+    
+    return ToolsResponse(toolboxes=toolboxes)
 
-class CallToolRequest(BaseModel):
-    toolbox_name: str = "Thirdweb"
-    tool_name: str
-    input: Dict[str, Any]
-    
-class CallToolResponse(BaseModel):
-    result: Dict[str, Any]
-    
-@router.post("/tools/call", response_model=CallToolResponse)
-async def call_tool(request: CallToolRequest):
-    # validate toolbox name
-    if request.toolbox_name != "Thirdweb":
-        raise HTTPException(status_code=404, detail=f"Toolbox {request.toolbox_name} not found")
-    
-    from src.services.mcp_client_service import MCPClientService
-    thirdweb_client = MCPClientService(
-        name="Thirdweb",
-        description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, create and manage smart contracts, etc.",
-        url="http://thirdweb_mcp:8080/sse"
-    )
-    await thirdweb_client.initialize()
-    tools = await thirdweb_client.get_tools()
-    
-    # validate tool name
-    if request.tool_name not in [tool.name for tool in tools]:
-        raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found")
-    
-    # Call a tool
-    logger.info(f"Calling tool {request.tool_name} with input {request.input}")
-    result = await thirdweb_client.invoke_tool(request.tool_name, request.input)
-    logger.info(f"Tool {request.tool_name} called with input {request.input} and result {result}")
-    return CallToolResponse(result=result)

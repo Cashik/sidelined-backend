@@ -5,14 +5,17 @@ from contextlib import asynccontextmanager
 from mcp import ClientSession, types
 from mcp.client.sse import sse_client
 
+from src import schemas
+
 logger = logging.getLogger(__name__)
 
 class MCPClientService:
 
-    def __init__(self, name: str, description: str, url: str):
-        self.name = name
-        self.description = description
-        self.url = url
+    def __init__(self, server: schemas.MCPSSEServer):
+        self.name = server.name
+        self.description = server.description
+        self.url = server.url
+        self.transport = server.transport
         self._tools: List[types.Tool] = []
         
         logger.info(f"Инициализация MCP клиента. {self.name} - {self.description} - {self.url}")

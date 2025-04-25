@@ -179,6 +179,19 @@ class GeneratedResponse(BaseModel):
 
 from mcp.types import Tool, ListToolsResult
 
+class MCPServer(BaseModel):
+    name: str
+    description: str
+    transport: str
+    
+class MCPSSEServer(MCPServer):
+    url: str
+    transport: str = "sse"
+    
+class MCPWebSocketServer(MCPServer):
+    url: str
+    transport: str = "websocket"
+
 class Toolbox(BaseModel):
     name: str
     description: str
