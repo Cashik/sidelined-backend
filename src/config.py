@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
     # MCP Servers and tools API keys
+    THIRDWEB_MCP_SSE_URL: str | None
     SMITHERY_API_KEY: str | None = None
     EXA_SEARCH_API_KEY: str | None = None
     

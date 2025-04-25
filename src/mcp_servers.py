@@ -9,13 +9,15 @@ from src.services.mcp_client_service import MCPClient
 
 logger = logging.getLogger(__name__)
 
-mcp_servers = [
-    schemas.MCPSSEServer(
-        name="Thirdweb",
-        description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, ask nebula etc.",
-        url="http://thirdweb_mcp:8080/sse"
-    )    
-]
+mcp_servers = []
+if settings.THIRDWEB_MCP_SSE_URL:
+    mcp_servers.append(
+        schemas.MCPSSEServer(
+            name="Thirdweb",
+            description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, ask nebula etc.",
+            url=settings.THIRDWEB_MCP_SSE_URL
+        )
+    )
 
 if settings.EXA_SEARCH_API_KEY and settings.SMITHERY_API_KEY:
     exa_search_url = smithery.create_smithery_url("wss://server.smithery.ai/exa/ws", {
