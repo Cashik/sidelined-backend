@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -68,7 +69,7 @@ async def user_to_assistant_generate_data(user: models.User, create_message_requ
         created_at=fact.created_at,
     ) for fact in user.facts]
     user_addresses:List[str] = [address.address for address in user.wallet_addresses]
-    chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, from_nonce=0, recipient=enums.Role.ASSISTANT)
+    chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id)
     user_profile_data = schemas.UserProfileData(
         preferred_name=user.preferred_name,
         user_context=user.user_context,
@@ -127,16 +128,22 @@ async def create_message(
         chat_details_level=create_message_request.chat_details_level,
     )
     
-    # Если это новый чат (был только что создан), запускаем фоновую задачу обработки контекста пользователя
+    # Если это новый чат (был только что создан), 
     is_new_chat = create_message_request.chat_id is None
     if is_new_chat:
+        # запускаем фоновую задачу обработки контекста пользователя
         background_tasks.add_task(
             user_context_service.update_user_information,
             user_id=user.id
         )
-    
+        # создаём новый чат
+        title = user_message.content.strip()[:30] + "..." if len(user_message.content) > 30 else user_message.content
+        chat = await crud.create_chat(db, user.id, title)
+        create_message_request.chat_id = chat.id
+
     # генерируем ответ от ИИ
-    assistant_generate_data = await user_to_assistant_generate_data(user, create_message_request, db)
+    assistant_generate_data: schemas.AssistantGenerateData = await user_to_assistant_generate_data(user, create_message_request, db)
+    assistant_generate_data.chat.messages.update({user_message.nonce: [user_message]})
     answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data, user.id, db)
     
     # добавляем новые сообщения в чат
@@ -207,14 +214,46 @@ async def regenerate_message(
 
 
 
-@router.post("/message/test_longgraph")
+@router.post("/message/stream", response_model=CreateMessageResponse)
 async def test_longgraph(
     create_message_request: schemas.MessageCreate,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_session)
 ):
-    # генерируем ответ с помощью longgraph
-    pass
+    from src.services.prompt_service import PromptService
+    from src.mcp_servers import mcp_servers as mcp_servers_list
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    # Используем модель по умолчанию, если не задана
+    model = create_message_request.model or settings.DEFAULT_AI_MODEL
+    
+        # Используем модель по умолчанию, если не задана
+    model = create_message_request.model or settings.DEFAULT_AI_MODEL
+    
+    user_message = schemas.Message(
+        content=create_message_request.message,
+        sender=enums.Role.USER,
+        recipient=enums.Role.ASSISTANT,
+        model=model,
+        nonce=create_message_request.nonce,
+        chat_style=create_message_request.chat_style,
+        chat_details_level=create_message_request.chat_details_level,
+    )
+    
+    # Если это новый чат (был только что создан), 
+    is_new_chat = create_message_request.chat_id is None
+    if is_new_chat:
+        # создаём новый чат
+        title = user_message.content.strip()[:30] + "..." if len(user_message.content) > 30 else user_message.content
+        chat = await crud.create_chat(db, user.id, title)
+        create_message_request.chat_id = chat.id
+
+    # генерируем ответ от ИИ
+    assistant_generate_data: schemas.AssistantGenerateData = await user_to_assistant_generate_data(user, create_message_request, db)
+    assistant_generate_data.chat.messages.update({user_message.nonce: [user_message]})
+    
+    prompt_service = PromptService(assistant_generate_data)
+    answer_stream = utils.generate_ai_response_asstream(prompt_service)
+    return StreamingResponse(answer_stream, media_type="text/event-stream")
 
 @router.post("/delete", response_model=DeleteResponse)
 async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):

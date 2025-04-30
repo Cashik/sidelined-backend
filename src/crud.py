@@ -176,6 +176,16 @@ async def get_user_chat(
     )
 
 
+async def create_chat(db: Session, user_id: int, title: str) -> models.Chat:
+    """
+    Создание нового чата
+    """
+    chat = models.Chat(user_id=user_id, title=title)
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+    return chat
+
 async def add_message(db: Session, chat_id: Optional[int], message: schemas.Message, user_id: int) -> schemas.Chat:
     """
     Добавление сообщения в чат
@@ -189,18 +199,8 @@ async def add_message(db: Session, chat_id: Optional[int], message: schemas.Mess
         # Генерируем заголовок чата из первых слов сообщения
         title = message.content.strip()[:30] + "..." if len(message.content) > 30 else message.content
         
-        # Создаем новый чат
-        new_chat = models.Chat(
-            user_id=user_id,
-            title=title,
-            created_at=message.created_at  # Используем время создания сообщения
-        )
-        
-        db.add(new_chat)
-        db.commit()
-        db.refresh(new_chat)
-        
-        chat_id = new_chat.id
+        chat = await create_chat(db, user_id, title)
+        chat_id = chat.id
     else:
         # Проверяем существование чата и права доступа
         chat_stmt = select(models.Chat).where(

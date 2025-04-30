@@ -2,7 +2,7 @@ import re
 import time
 import json
 import os
-from typing import Optional, Dict, List, Any
+from typing import AsyncGenerator, Optional, Dict, List, Any
 import logging
 import openai
 from openai import OpenAI
@@ -222,6 +222,125 @@ async def generate_ai_response(prompt_service: PromptService, tools: List[schema
     return result
 
 
+def to_sse(event_type: str, payload: dict) -> str:
+    """
+    Преобразует данные в строку вида:
+    data:{"type":"...", ...}\n\n
+    """
+    return f'data:{json.dumps({"type": event_type, **payload}, ensure_ascii=False)}\n\n'
+
+async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncGenerator[str, None]:
+    from langchain.chat_models import init_chat_model
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain.agents import create_tool_calling_agent, AgentExecutor
+    from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
+    from src.mcp_servers import mcp_servers as mcp_servers_list
+
+    mcp_servers = {}
+    for server in mcp_servers_list:
+        mcp_server = {
+            "url": server.url,
+            "transport": server.transport
+        }
+        mcp_servers[server.name] = mcp_server
+    
+    mcp_multi_client = MultiServerMCPClient(mcp_servers)
+    
+
+    logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
+    logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
+    
+    # Некоторые модели не поддерживают системные роли или другие роли
+    avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_FLASH.value]
+    logger.info(f"Avoid system role: {avoid_system_role}")
+    messages = prompt_service.generate_langchain_messages(avoid_system_role)
+
+    logger.info(f"Sending request to Gemini with messages: {messages}")
+    
+    prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder("chat_history"),
+        MessagesPlaceholder("agent_scratchpad")
+    ])
+
+    model_provider = ""
+    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO]:
+        model_provider = "google_genai"
+    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI]:
+        model_provider = "openai"
+    else:
+        raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
+
+    api_key = ""
+    if model_provider == "google_genai":
+        api_key = settings.GEMINI_API_KEY
+    elif model_provider == "openai":
+        api_key = settings.OPENAI_API_KEY
+    else:
+        raise NotImplementedError(f"Provider \"{model_provider}\" do not turned on!")
+
+    llm = init_chat_model(
+        model=prompt_service.generate_data.chat_settings.model.value,
+        model_provider=model_provider,
+        api_key=api_key
+    )
+
+    # Генерируем ответ, используя MCP сессию
+    async with mcp_multi_client as mcp_session:
+        logger.info(f"Generating response with MCP tools ...")
+        tools = mcp_session.get_tools()
+
+        agent = create_tool_calling_agent(
+            llm=llm,
+            tools=tools,
+            prompt=prompt
+        )
+        
+        executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            max_iterations=10, #TODO: add max_iterations
+            verbose=settings.DEBUG
+        )
+        cur_msg_id = None           # для группировки чанков
+        async for ev in executor.astream_events(
+            {"chat_history": messages}
+        ):
+            kind = ev["event"]
+
+            # 1. начало нового assistant-сообщения
+            if kind == "on_chat_model_start":
+                cur_msg_id = ev["run_id"]
+                yield to_sse("message_start", {"id": cur_msg_id})
+
+            # 2. токены
+            elif kind == "on_chat_model_stream":
+                ch = ev["data"]["chunk"]
+                if ch.content:                       # пропускаем tool-JSON
+                    yield to_sse("message_chunk",{"id": cur_msg_id, "text": ch.content})
+
+            # 3. конец сообщения
+            elif kind == "on_chat_model_end":
+                logger.info(f"on_chat_model_end: {ev}")
+                answer = ev["data"]["output"].content
+                yield to_sse("message_end", {"id": cur_msg_id, "text": answer})
+                cur_msg_id = None                    # сброс
+
+            # 4. начало вызова инструмента
+            elif kind == "on_tool_start":
+                tool_name = ev["name"]
+                tool_input = ev["data"]["input"]
+                yield to_sse("tool_call",
+                        {"name": tool_name, "args": tool_input})
+
+            # 5. результат инструмента
+            elif kind == "on_tool_end":
+                yield to_sse("tool_result",
+                        {"output": ev["data"]["output"]})
+
+        return
+
+        
+        
 async def check_user_access(user: models.User) -> bool:
     """
     Проверка баланса пользователя в Thirdweb по всем его кошелькам
