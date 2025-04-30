@@ -1,13 +1,10 @@
-from openai import OpenAI
 import logging
-from pydantic import BaseModel
 from typing import List, Optional, Any
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langchain.agents import AgentExecutor, create_openai_tools_agent, create_react_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_mcp_adapters.tools import load_mcp_tools
-from mcp import ClientSession
+
 
 from src.providers.base import AIProvider
 from src.config import settings
@@ -43,7 +40,7 @@ class OpenAIProvider(AIProvider):
             api_key=settings.OPENAI_API_KEY
         )
         
-        agent = create_openai_tools_agent(
+        agent = create_tool_calling_agent(
             llm=llm,
             tools=tools,
             prompt=prompt

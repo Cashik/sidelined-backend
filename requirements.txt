@@ -19,5 +19,6 @@ langchain
 langchain[openai]
 langchain-google-genai
 langchain-mcp-adapters
+langgraph
 smithery
 jsonschema

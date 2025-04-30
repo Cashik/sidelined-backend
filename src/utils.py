@@ -36,14 +36,6 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         logger.info(f"Setting up AI provider ...")
         logger.info(f"Model: {generate_data.chat_settings.model}")
          
-        # Выбираем AI провайдера
-        if generate_data.chat_settings.model in (enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI) and settings.OPENAI_API_KEY:
-            ai_provider = openai.OpenAIProvider()
-        elif generate_data.chat_settings.model in (enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO) and settings.GEMINI_API_KEY:
-            ai_provider = gemini.GeminiProvider()
-        else:
-            raise NotImplementedError(f"Model \"{generate_data.chat_settings.model.value}\" is not implemented yet!")
-        
         mcp_servers = {}
         for server in mcp_servers_list:
             mcp_server = {
@@ -58,7 +50,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         async with mcp_multi_client as mcp_session:
             logger.info(f"Generating response with MCP tools ...")
             tools = mcp_session.get_tools()
-            provider_answer: schemas.GeneratedResponse = await ai_provider.generate_response(
+            provider_answer: schemas.GeneratedResponse = await generate_ai_response(
                 prompt_service, 
                 tools
             )
@@ -160,6 +152,74 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         )
         
         return [answer_message]
+
+async def generate_ai_response(prompt_service: PromptService, tools: List[schemas.Tool] = []) -> schemas.GeneratedResponse:
+    from langchain.chat_models import init_chat_model
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain.agents import create_tool_calling_agent, AgentExecutor
+
+    logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
+    logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
+    
+    # Некоторые модели не поддерживают системные роли или другие роли
+    avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_FLASH.value]
+    logger.info(f"Avoid system role: {avoid_system_role}")
+    messages = prompt_service.generate_langchain_messages(avoid_system_role)
+
+    logger.info(f"Sending request to Gemini with messages: {messages}")
+    
+    prompt = ChatPromptTemplate.from_messages([
+        MessagesPlaceholder("chat_history"),
+        MessagesPlaceholder("agent_scratchpad")
+    ])
+
+    model_provider = ""
+    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO]:
+        model_provider = "google_genai"
+    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI]:
+        model_provider = "openai"
+    else:
+        raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
+
+    api_key = ""
+    if model_provider == "google_genai":
+        api_key = settings.GEMINI_API_KEY
+    elif model_provider == "openai":
+        api_key = settings.OPENAI_API_KEY
+    else:
+        raise NotImplementedError(f"Provider \"{model_provider}\" do not turned on!")
+
+    llm = init_chat_model(
+        model=prompt_service.generate_data.chat_settings.model.value,
+        model_provider=model_provider,
+        api_key=api_key
+    )
+
+    agent = create_tool_calling_agent(
+        llm=llm,
+        tools=tools,
+        prompt=prompt
+    )
+    
+    executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        max_iterations=10, #TODO: add max_iterations
+        verbose=settings.DEBUG
+    )
+    
+    response = await executor.ainvoke({"chat_history": messages})
+    
+    # Обработка ответа
+    answer_text = response["output"] if response["output"] else ""
+    
+    result = schemas.GeneratedResponse(
+        text=answer_text,
+        function_calls=[]
+    )
+    
+    logger.info(f"Answer: {result}")
+    return result
 
 
 async def check_user_access(user: models.User) -> bool:

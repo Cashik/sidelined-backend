@@ -6,6 +6,10 @@ import time
 
 from src import enums
 
+def now_timestamp():
+    """Получение текущего timestamp в секундах"""
+    return int(time.time())
+
 
 # апи-схемы роутера auth
 
@@ -101,8 +105,8 @@ class Message(BaseModel):
     nonce: int
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
-    created_at: int
-    selected_at: int
+    created_at: int = Field(default_factory=now_timestamp)
+    selected_at: int = Field(default_factory=now_timestamp)
 
 class Chat(BaseModel):
     id: int

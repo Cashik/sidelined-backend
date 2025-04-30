@@ -7,13 +7,11 @@ from src.providers.base import AIProvider
 from src.config import settings
 from src.services.prompt_service import PromptService
 from src import enums, schemas
-from mcp import ClientSession
-from langchain_mcp_adapters.tools import load_mcp_tools
 
 from langchain.chat_models import init_chat_model
 
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_tool_calling_agent, AgentExecutor, create_react_agent
+from langchain.agents import create_tool_calling_agent, AgentExecutor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)

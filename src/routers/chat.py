@@ -54,6 +54,35 @@ class DeleteResponse(BaseModel):
     success: bool = True
 
 
+async def user_to_assistant_generate_data(user: models.User, create_message_request: schemas.MessageCreate, db: Session) -> schemas.AssistantGenerateData:
+    model = create_message_request.model or settings.DEFAULT_AI_MODEL
+    
+    chat_settings = schemas.GenerateMessageSettings(
+        model=model,
+        chat_style=create_message_request.chat_style,
+        chat_details_level=create_message_request.chat_details_level,
+    )
+    user_facts = [schemas.FactAboutUser(
+        id=fact.id,
+        description=fact.description,
+        created_at=fact.created_at,
+    ) for fact in user.facts]
+    user_addresses:List[str] = [address.address for address in user.wallet_addresses]
+    chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, from_nonce=0, recipient=enums.Role.ASSISTANT)
+    user_profile_data = schemas.UserProfileData(
+        preferred_name=user.preferred_name,
+        user_context=user.user_context,
+        facts=user_facts,
+        addresses=user_addresses,
+        selected_address=create_message_request.selected_address,
+    )
+    assistant_generate_data = schemas.AssistantGenerateData(
+        user=user_profile_data,
+        chat=chat,
+        chat_settings=chat_settings,
+    )
+    return assistant_generate_data
+
 @router.get("/providers", response_model=ProvidersResponse)
 async def get_providers():
     # TODO: добавить выключение моделей и сервисов
@@ -96,10 +125,7 @@ async def create_message(
         nonce=create_message_request.nonce,
         chat_style=create_message_request.chat_style,
         chat_details_level=create_message_request.chat_details_level,
-        created_at=utils.now_timestamp(),
-        selected_at=utils.now_timestamp(),
     )
-    chat: schemas.Chat = await crud.add_message(db, create_message_request.chat_id, user_message, user.id)
     
     # Если это новый чат (был только что создан), запускаем фоновую задачу обработки контекста пользователя
     is_new_chat = create_message_request.chat_id is None
@@ -110,31 +136,11 @@ async def create_message(
         )
     
     # генерируем ответ от ИИ
-    chat_settings = schemas.GenerateMessageSettings(
-        model=model,
-        chat_style=create_message_request.chat_style,
-        chat_details_level=create_message_request.chat_details_level,
-    )
-    user_facts = [schemas.FactAboutUser(
-        id=fact.id,
-        description=fact.description,
-        created_at=fact.created_at,
-    ) for fact in user.facts]
-    user_addresses:List[str] = [address.address for address in user.wallet_addresses]
-    user_profile_data = schemas.UserProfileData(
-        preferred_name=user.preferred_name,
-        user_context=user.user_context,
-        facts=user_facts,
-        addresses=user_addresses,
-        selected_address=create_message_request.selected_address,
-    )
-    assistant_generate_data = schemas.AssistantGenerateData(
-        user=user_profile_data,
-        chat=chat,
-        chat_settings=chat_settings,
-    )
+    assistant_generate_data = await user_to_assistant_generate_data(user, create_message_request, db)
     answer_messages: List[schemas.Message] = await utils.get_ai_answer(assistant_generate_data, user.id, db)
+    
     # добавляем новые сообщения в чат
+    chat: schemas.Chat = await crud.add_message(db, create_message_request.chat_id, user_message, user.id)
     for message in answer_messages:
         chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)
     return CreateMessageResponse(chat=chat, answer_message=answer_messages[0])
@@ -198,6 +204,17 @@ async def regenerate_message(
     for message in answer_messages:
         chat: schemas.Chat = await crud.add_message(db, chat.id, message, user.id)
     return CreateMessageResponse(chat=chat, answer_message=answer_messages[0])
+
+
+
+@router.post("/message/test_longgraph")
+async def test_longgraph(
+    create_message_request: schemas.MessageCreate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_session)
+):
+    # генерируем ответ с помощью longgraph
+    pass
 
 @router.post("/delete", response_model=DeleteResponse)
 async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
