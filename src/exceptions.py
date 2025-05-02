@@ -53,3 +53,7 @@ class LastAddressException(Exception):
     """Исключение, возникающее при попытке удалить последний адрес пользователя"""
     pass
 
+class AddMessageException(Exception):
+    """Исключение, возникающее при попытке добавить сообщение в чат"""
+    pass
+

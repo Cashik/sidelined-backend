@@ -73,15 +73,19 @@ class PromptService:
         # Добавление сообщений из истории чата
         for nonce in sorted(self.generate_data.chat.messages.keys()):
             message = max(self.generate_data.chat.messages[nonce], key=lambda x: x.selected_at)
+            
+            if message.type is not enums.MessageType.TEXT:
+                continue
+            
             if message.sender is enums.Role.USER:
-                messages.append(HumanMessage(content=message.content))
+                messages.append(HumanMessage(content=message.content.message))
             elif message.sender is enums.Role.ASSISTANT:
-                messages.append(AIMessage(content=message.content))
+                messages.append(AIMessage(content=message.content.message))
             elif message.sender is enums.Role.SYSTEM:
                 if avoid_system_role:
-                    messages.append(HumanMessage(content="System: " + message.content))
+                    messages.append(HumanMessage(content="System: " + message.content.message))
                 else:
-                    messages.append(SystemMessage(content=message.content))
+                    messages.append(SystemMessage(content=message.content.message))
             else:
                 logger.error(f"Unknown message sender: {message.sender}")
                 pass

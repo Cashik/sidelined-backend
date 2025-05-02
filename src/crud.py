@@ -2,11 +2,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
 from sqlalchemy import select, delete, or_, and_, func, desc
 from sqlalchemy.orm import Session
-import random
-import time
-
 from src import models, schemas, enums, exceptions
-from src.config import settings
 
 import logging
 
@@ -64,21 +60,11 @@ async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.Chat
     # Получаем время последнего сообщения для каждого чата
     result = []
     for chat in chats:
-        # Находим последнее сообщение для определения времени обновления
-        last_message_stmt = select(models.Message).where(
-            models.Message.chat_id == chat.id
-        ).order_by(desc(models.Message.created_at)).limit(1)
-        
-        last_message = db.execute(last_message_stmt).scalar_one_or_none()
-        
-        # Используем время последнего сообщения или время создания чата, если сообщений нет
-        last_updated_at = last_message.created_at if last_message else chat.created_at
-        
         # Создаем объект ChatSummary
         result.append(schemas.ChatSummary(
             id=chat.id,
             title=chat.title,
-            last_updated_at=last_updated_at
+            created_at=chat.created_at
         ))
     
     return result
@@ -87,7 +73,7 @@ async def get_user_chats_summary(db: Session, user_id: int) -> List[schemas.Chat
 async def get_user_chat(
     db: Session, 
     chat_id: int, 
-    user_id: int, 
+    user_id: int,
     from_nonce: Optional[int] = None, 
     to_nonce: Optional[int] = None,
     recipient: Optional[enums.Role] = None
@@ -146,21 +132,10 @@ async def get_user_chat(
     messages = db.execute(messages_stmt).scalars().all()
     
     # Группируем сообщения по nonce, отбирая последнее выбранное для каждого nonce
-    messages_dict: Dict[int, List[schemas.Message]] = {}
-    
+    messages_dict: Dict[int, List[schemas.MessageUnion]] = {}
     for message in messages:
-        # Преобразуем модель в схему
-        schema_message = schemas.Message(
-            content=message.content,
-            sender=message.sender,
-            recipient=message.recipient,
-            model=message.model,
-            nonce=message.nonce,
-            chat_style=message.chat_style,
-            chat_details_level=message.chat_details_level,
-            created_at=message.created_at,
-            selected_at=message.selected_at
-        )
+        # Преобразуем модель в словарь
+        schema_message = schemas.MessageUnionAdapter.validate_python(message)
         
         # Группируем сообщения по nonce
         if message.nonce not in messages_dict:
@@ -184,76 +159,48 @@ async def create_chat(db: Session, user_id: int, title: str) -> models.Chat:
     db.add(chat)
     db.commit()
     db.refresh(chat)
-    return chat
-
-async def add_message(db: Session, chat_id: Optional[int], message: schemas.Message, user_id: int) -> schemas.Chat:
-    """
-    Добавление сообщения в чат
-    Если chat_id не указан, создается новый чат
-    Если nonce указан в сообщении, то все последующие сообщения удаляются
-    Если nonce указан и в чате есть сообщение с таким nonce, но роль не юзерская, то ошибка
-    Если nonce не указан, то добавляется в конец чата
-    """
-    # Если chat_id не указан, создаем новый чат
-    if chat_id is None:
-        # Генерируем заголовок чата из первых слов сообщения
-        title = message.content.strip()[:30] + "..." if len(message.content) > 30 else message.content
-        
-        chat = await create_chat(db, user_id, title)
-        chat_id = chat.id
-    else:
-        # Проверяем существование чата и права доступа
-        chat_stmt = select(models.Chat).where(
-            models.Chat.id == chat_id,
-            models.Chat.visible == True
-        )
-        chat = db.execute(chat_stmt).scalar_one_or_none()
-        
-        if not chat:
-            raise exceptions.ChatNotFoundException()
-        
-        if chat.user_id != user_id:
-            raise exceptions.UserNotChatOwnerException()
-    
-    # Проверяем, если nonce уже существует и это сообщение ассистента
-    existing_message_stmt = select(models.Message).where(
-        models.Message.chat_id == chat_id,
-        models.Message.nonce == message.nonce
-    ).order_by(desc(models.Message.selected_at)).limit(1)
-    existing_message = db.execute(existing_message_stmt).scalar_one_or_none()
-    
-    if existing_message and existing_message.sender == enums.Role.ASSISTANT and message.sender == enums.Role.USER:
-        raise exceptions.InvalidNonceException()
-    
-    # Удаляем все сообщения с большим nonce, но только если регенерируем сообщениие от юзера
-    if existing_message and existing_message.sender == enums.Role.USER:
-        delete_stmt = delete(models.Message).where(
-            models.Message.chat_id == chat_id,
-            models.Message.nonce > message.nonce
-        )
-        db.execute(delete_stmt)
-    
-    # Создаем новое сообщение
-    new_message = models.Message(
-        chat_id=chat_id,
-        content=message.content,
-        sender=message.sender,
-        recipient=message.recipient,
-        model=message.model,
-        nonce=message.nonce,
-        chat_style=message.chat_style,
-        chat_details_level=message.chat_details_level,
-        created_at=message.created_at,
-        selected_at=message.selected_at
+    return schemas.Chat(
+        id=chat.id,
+        title=chat.title,
+        messages={}
     )
-    
-    db.add(new_message)
-    db.commit()
-    
-    # Возвращаем обновленный чат с учетом режима DEBUG
-    recipient = None if settings.DEBUG else enums.Role.USER
-    return await get_user_chat(db, chat_id, user_id, recipient=recipient)
 
+async def get_next_nonce(db: Session, chat_id: int, user_id: int) -> int:
+    """
+    Получение следующего доступного nonce для чата
+    """
+    stmt = select(func.max(models.Message.nonce)).where(
+        models.Message.chat_id == chat_id,
+        models.Message.sender == enums.Role.USER
+    )
+    max_nonce = db.execute(stmt).scalar_one_or_none() or 0
+    return max_nonce + 1
+
+async def add_chat_messages(db: Session, chat_id: int, messages: List[schemas.MessageUnion], user_id: int) -> schemas.Chat:
+    """
+    Добавление нескольких сообщений в чат
+    """
+    def shema_message_to_model(message: schemas.MessageUnion) -> models.Message:
+        return models.Message(
+            type=message.type,
+            chat_id=chat_id,
+            content=message.content.model_dump(mode="json"),
+            sender=message.sender,
+            recipient=message.recipient,
+            nonce=message.nonce,
+            generation_time_ms=message.generation_time_ms
+        )
+        
+    try:
+        for message in messages:
+            db.add(shema_message_to_model(message))
+        
+        db.commit()
+    except Exception as e:
+        raise exceptions.AddMessageException(f"Error adding message: {str(e)}")
+    
+    return await get_user_chat(db, chat_id, user_id)
+    
 
 async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     """
@@ -512,7 +459,8 @@ async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[m
             )
         ),
         models.Message.nonce > models.Chat.last_analysed_nonce,
-        models.Message.sender == enums.Role.USER
+        models.Message.sender == enums.Role.USER,
+        models.Message.type == enums.MessageType.TEXT
     )
     return session.execute(stmt).scalars().all()
 

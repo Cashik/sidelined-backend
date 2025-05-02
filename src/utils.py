@@ -26,7 +26,7 @@ def now_timestamp():
     return int(time.time())
 
 
-async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.Message]:
+async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.MessageUnion]:
     """
     Получение ответа от ИИ на основе контекста чата
     """
@@ -54,10 +54,8 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                 prompt_service, 
                 tools
             )
-
             
         logger.info(f"Response generated: {provider_answer}")
-        
         
         # Определение нового nonce (следующий после последнего в чате)
         last_nonce = max(generate_data.chat.messages.keys()) if generate_data.chat.messages else -1
@@ -66,24 +64,25 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         result_messages = []
         
         if provider_answer.text:
-            result_messages.append(schemas.Message(
-                content=provider_answer.text,
+            result_messages.append(schemas.ChatMessage(
                 sender=enums.Role.ASSISTANT,
                 recipient=enums.Role.USER,
                 model=generate_data.chat_settings.model,
                 nonce=new_nonce,
-                chat_style=generate_data.chat_settings.chat_style,
-                chat_details_level=generate_data.chat_settings.chat_details_level,
-                created_at=now_timestamp(),
-                selected_at=now_timestamp()
+                content=schemas.MessageContent(
+                    message=provider_answer.text,
+                    settings=schemas.MessageGenerationSettings(
+                        model=generate_data.chat_settings.model,
+                        chat_style=generate_data.chat_settings.chat_style,
+                        chat_details_level=generate_data.chat_settings.chat_details_level,
+                    )
+                )
             ))
             new_nonce += 1
-        
-        if provider_answer.function_calls and settings.FUNCTIONALITY_ENABLED:
             for function_call in provider_answer.function_calls:
                 if function_call.name == "add_facts":
                     user, added_facts = await crud.add_user_facts(user_id, function_call.args, db)
-                    result_messages.append(schemas.Message(
+                    result_messages.append(schemas.MessageBase(
                         content=f"Added notes:{os.linesep.join(added_facts)}",
                         sender=enums.Role.SYSTEM,
                         recipient=enums.Role.ASSISTANT,
@@ -95,7 +94,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                 elif function_call.name == "del_facts":
                     try:
                         user, deleted_facts = await crud.delete_user_facts(user_id, function_call.args, db)
-                        result_messages.append(schemas.Message(
+                        result_messages.append(schemas.MessageBase(
                             content=f"Deleted notes:{os.linesep.join(deleted_facts)}",  
                             sender=enums.Role.SYSTEM,
                             recipient=enums.Role.ASSISTANT,
@@ -106,7 +105,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                         ))
                     except exceptions.FactNotFoundException as e:
                         logger.error(f"Error deleting notes: {e}")
-                        result_messages.append(schemas.Message(
+                        result_messages.append(schemas.MessageBase(
                             content=f"Error deleting notes: {str(e)}",
                             sender=enums.Role.SYSTEM,
                             recipient=enums.Role.ASSISTANT,
@@ -116,7 +115,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                             selected_at=now_timestamp()
                         ))
                 else:
-                    result_messages.append(schemas.Message(
+                    result_messages.append(schemas.MessageBase(
                         content=f"Failed to call function {function_call.name} with arguments {function_call.args}. Function is not exists!",
                         sender=enums.Role.SYSTEM,
                         recipient=enums.Role.ASSISTANT,
@@ -141,7 +140,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         new_nonce = last_nonce + 1
         
         # Создание объекта сообщения с ошибкой
-        answer_message = schemas.Message(
+        answer_message = schemas.MessageBase(
             content=error_message,
             sender=enums.Role.SYSTEM,
             recipient=enums.Role.USER,
@@ -301,7 +300,8 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
             max_iterations=10, #TODO: add max_iterations
             verbose=settings.DEBUG
         )
-        cur_msg_id = None           # для группировки чанков
+        yield to_sse("generation_start", {"chat_id": prompt_service.generate_data.chat.id})
+        cur_msg_id = None # для группировки чанков
         async for ev in executor.astream_events(
             {"chat_history": messages}
         ):
@@ -327,17 +327,26 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
 
             # 4. начало вызова инструмента
             elif kind == "on_tool_start":
+                logger.info(f"on_tool_start: {ev}")
                 tool_name = ev["name"]
                 tool_input = ev["data"]["input"]
-                yield to_sse("tool_call",
-                        {"name": tool_name, "args": tool_input})
+                yield to_sse("tool_call",{
+                    "id": ev["run_id"],
+                    "name": tool_name,
+                    "args": tool_input
+                })
 
             # 5. результат инструмента
             elif kind == "on_tool_end":
-                yield to_sse("tool_result",
-                        {"output": ev["data"]["output"]})
+                logger.info(f"on_tool_end: {ev}")
+                yield to_sse("tool_result",{
+                    "id": ev["run_id"],
+                    "name": ev["name"],
+                    "args": ev["data"]["input"],
+                    "output": ev["data"]["output"]
+                })
 
-        return
+        yield to_sse("generation_end", {})
 
         
         

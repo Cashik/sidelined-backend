@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, TypeAdapter
 from datetime import datetime
 import time
 
@@ -97,37 +97,60 @@ class TokenPayload(BaseModel):
 
 # бизнес-схемы чата
 
-class Message(BaseModel):
+class MessageGenerationSettings(BaseModel):
+    model: Optional[enums.Model] = None
+    chat_style: Optional[enums.ChatStyle] = None
+    chat_details_level: Optional[enums.ChatDetailsLevel] = None
+
+class MessageContent(BaseModel):
+    message: str
+    settings: MessageGenerationSettings
+
+class ToolCallContent(BaseModel):
+    name: str
+    input: Dict[str, Any]
+    output: Dict[str, Any]
+
+# TODO: добавить generation_time_ms
+class MessageBase(BaseModel):
+    type: enums.MessageType
     content: str
     sender: enums.Role
     recipient: enums.Role
-    model: enums.Model
     nonce: int
-    chat_style: Optional[enums.ChatStyle] = None
-    chat_details_level: Optional[enums.ChatDetailsLevel] = None
     created_at: int = Field(default_factory=now_timestamp)
     selected_at: int = Field(default_factory=now_timestamp)
+    generation_time_ms: int = 0
+    
+    model_config = ConfigDict(from_attributes = True)
+
+class ChatMessage(MessageBase):
+    type: Literal[enums.MessageType.TEXT] = enums.MessageType.TEXT
+    content: MessageContent
+
+class ToolCallMessage(MessageBase):
+    type: Literal[enums.MessageType.TOOL_CALL] = enums.MessageType.TOOL_CALL
+    content: ToolCallContent
+
+MessageUnion = Annotated[Union[ChatMessage, ToolCallMessage], Field(discriminator="type")]
+MessageUnionAdapter = TypeAdapter(MessageUnion)
+
 
 class Chat(BaseModel):
     id: int
     title: str
-    messages: Dict[int, List[Message]] # nonce: [message, message, ...]
+    messages: Dict[int, List[MessageUnion]] # nonce: [message, message, ...]
 
 # апи-схемы чата с ИИ
 
-class MessageCreate(BaseModel):
-    chat_id: Optional[int] = None
-    nonce: int # для изменения старого сообщения
-    message: str
-    model: Optional[enums.Model] = None
-    chat_style: Optional[enums.ChatStyle] = None
-    chat_details_level: Optional[enums.ChatDetailsLevel] = None
-    selected_address: Optional[str] = None
-    
+
+
+
+ 
 class ChatSummary(BaseModel):
     id: int
     title: str
-    last_updated_at: int
+    created_at: int
     
 # бизнес-схемы генерации сообщений
 

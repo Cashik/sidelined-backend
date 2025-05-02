@@ -43,6 +43,14 @@ class TokenInterface(Enum):
     ERC721 = "erc721"
     ERC1155 = "erc1155"
     
-    
+class MessageType(Enum):
+    TEXT = "text"
+    TOOL_CALL = "tool_call"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+    FILE = "file"
+    LOCATION = "location"
+    TRANSACTION = "transaction"
     
 

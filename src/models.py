@@ -81,15 +81,14 @@ class Message(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(Integer, ForeignKey("chat.id"))
-    content = Column(String)
+    type = Column(postgresql.ENUM(enums.MessageType))
+    content = Column(postgresql.JSONB)
     sender = Column(postgresql.ENUM(enums.Role))
     recipient = Column(postgresql.ENUM(enums.Role))
     nonce = Column(Integer)
-    model = Column(postgresql.ENUM(enums.Model), nullable=True, default=None)
-    chat_style = Column(postgresql.ENUM(enums.ChatStyle), nullable=True, default=None)
-    chat_details_level = Column(postgresql.ENUM(enums.ChatDetailsLevel), nullable=True, default=None)
     created_at = Column(Integer, default=now_timestamp)
     selected_at = Column(Integer, default=now_timestamp)
+    generation_time_ms = Column(Integer, default=0)
     
     # Relationships
     chat = relationship("Chat", back_populates="messages")
