@@ -16,12 +16,12 @@ class Service(Enum):
     
 
 class Model(Enum):
-    GPT_4 = "gpt-4"
     GPT_4O = "gpt-4o"
-    GPT_4O_MINI = "gpt-4o-mini"
+    GPT_4_1 = "gpt-4.1"
+    GPT_O4_MINI = "o4-mini"
     
-    GEMINI_2_FLASH = "gemini-2.0-flash"
-    GEMINI_2_5_PRO = "gemini-2.5-pro-exp-03-25"
+    GEMINI_2_5_PRO = "gemini-2.5-pro-preview-03-25"
+    GEMINI_2_5_FLASH = "gemini-2.5-flash-preview-04-17"
 
 
 class ChatStyle(Enum):

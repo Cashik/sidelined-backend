@@ -41,8 +41,6 @@ requirements = [
 ]
 
 
-
-
 class Settings(BaseSettings):
     # Server settings
     HOST: str = "0.0.0.0"

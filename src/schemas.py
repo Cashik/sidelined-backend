@@ -1,11 +1,13 @@
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from decimal import Decimal
-from pydantic import BaseModel, Field, ConfigDict, TypeAdapter
+from pydantic import BaseModel, Field, ConfigDict, TypeAdapter, field_validator
 from datetime import datetime
 import time
 
 from src import enums
+import logging
 
+logger = logging.getLogger(__name__)
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
@@ -101,6 +103,39 @@ class MessageGenerationSettings(BaseModel):
     model: Optional[enums.Model] = None
     chat_style: Optional[enums.ChatStyle] = None
     chat_details_level: Optional[enums.ChatDetailsLevel] = None
+    
+    # Валидаторы, чтобы небыло ошибок при получении старых данных из базы
+    # И чтобы не записывать не валидные значения в базу
+    @field_validator("model", mode="before")
+    def validate_model(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.Model(v)
+        except ValueError:
+            # Можно логировать здесь
+            logger.warning(f"Invalid model: {v}")
+            return None
+
+    @field_validator("chat_style", mode="before")
+    def validate_chat_style(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.ChatStyle(v)
+        except ValueError:
+            return None
+
+    @field_validator("chat_details_level", mode="before")
+    def validate_chat_details_level(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.ChatDetailsLevel(v)
+        except ValueError:
+            return None
+    
+    
 
 class MessageContent(BaseModel):
     message: str

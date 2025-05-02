@@ -250,9 +250,7 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
     
     # Некоторые модели не поддерживают системные роли или другие роли
-    avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_FLASH.value]
-    logger.info(f"Avoid system role: {avoid_system_role}")
-    messages = prompt_service.generate_langchain_messages(avoid_system_role)
+    messages = prompt_service.generate_langchain_messages()
 
     logger.info(f"Sending request to Gemini with messages: {messages}")
     
@@ -262,9 +260,9 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     ])
 
     model_provider = ""
-    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO]:
+    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_5_FLASH, enums.Model.GEMINI_2_5_PRO]:
         model_provider = "google_genai"
-    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI]:
+    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4_1, enums.Model.GPT_O4_MINI, enums.Model.GPT_4O]:
         model_provider = "openai"
     else:
         raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
