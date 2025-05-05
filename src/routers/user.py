@@ -41,6 +41,11 @@ class WalletAddressDeleteRequest(BaseModel):
 def db_user_to_schema_user(user: models.User) -> schemas.User:
     facts = [schemas.UserFact(id=fact.id, description=fact.description, created_at=fact.created_at) for fact in user.facts]
     wallet_addresses = [schemas.WalletAddress(address=wallet.address, created_at=wallet.created_at) for wallet in user.wallet_addresses]
+    if user.chat_settings:
+        chat_settings = schemas.MessageGenerationSettings.model_validate(user.chat_settings)
+    else:
+        chat_settings = schemas.MessageGenerationSettings()
+    
     return schemas.User(
         credits=user.credits,
         profile=schemas.UserProfile(
@@ -49,9 +54,9 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
             facts=facts
         ),
         chat_settings=schemas.UserChatSettings(
-            preferred_chat_model=user.preferred_chat_model,
-            preferred_chat_style=user.preferred_chat_style, 
-            preferred_chat_details_level=user.preferred_chat_details_level
+            preferred_chat_model=chat_settings.model,
+            preferred_chat_style=chat_settings.chat_style, 
+            preferred_chat_details_level=chat_settings.chat_details_level
         ),
         connected_wallets=wallet_addresses
     )
@@ -72,12 +77,19 @@ async def get_available_settings():
 
 @router.post("/settings/chat", response_model=schemas.UserChatSettings)
 async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    user_data: models.User = await crud.update_user_chat_settings(user.id, request, db)
-    return schemas.UserChatSettings(
-        preferred_chat_model=user_data.preferred_chat_model,
-        preferred_chat_style=user_data.preferred_chat_style,
-        preferred_chat_details_level=user_data.preferred_chat_details_level
+    new_chat_settings = schemas.MessageGenerationSettings(
+        model=request.preferred_chat_model,
+        chat_style=request.preferred_chat_style,
+        chat_details_level=request.preferred_chat_details_level
     )
+    user_data: models.User = await crud.update_user_chat_settings(user.id, new_chat_settings, db)
+    user_chat_settings_response = schemas.UserChatSettings()
+    if user_data.chat_settings:
+        user_chat_settings = schemas.MessageGenerationSettings.model_validate(user_data.chat_settings)
+        user_chat_settings_response.preferred_chat_model = user_chat_settings.model
+        user_chat_settings_response.preferred_chat_style = user_chat_settings.chat_style
+        user_chat_settings_response.preferred_chat_details_level = user_chat_settings.chat_details_level
+    return user_chat_settings_response
 
 @router.post("/settings/profile", response_model=schemas.User)
 async def update_user_settings(request: UserProfileUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):

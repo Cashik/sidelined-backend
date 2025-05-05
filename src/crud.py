@@ -242,7 +242,7 @@ async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
 
 async def update_user_chat_settings(
     user_id: int,
-    settings: schemas.UserChatSettings,
+    settings: schemas.MessageGenerationSettings,
     session: Session
 ) -> models.User:
     """
@@ -253,10 +253,8 @@ async def update_user_chat_settings(
         raise exceptions.UserNotFoundException()
     
     # Обновляем все поля, включая None
-    user.preferred_chat_model = settings.preferred_chat_model
-    user.preferred_chat_style = settings.preferred_chat_style
-    user.preferred_chat_details_level = settings.preferred_chat_details_level
-    
+    user.chat_settings = settings.model_dump(mode="json")
+    logger.info(f"Updated chat settings: {user.chat_settings}")
     session.add(user)
     session.commit()
     session.refresh(user)

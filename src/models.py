@@ -24,9 +24,7 @@ class User(Base):
     # информация о пользователе
     preferred_name = Column(String(20), nullable=True)
     user_context = Column(String(500), nullable=True)
-    preferred_chat_model = Column(postgresql.ENUM(enums.Model), nullable=True, default=None)
-    preferred_chat_style = Column(postgresql.ENUM(enums.ChatStyle), nullable=True, default=None)
-    preferred_chat_details_level = Column(postgresql.ENUM(enums.ChatDetailsLevel), nullable=True, default=None)
+    chat_settings = Column(postgresql.JSONB, nullable=True, server_default=None)
     
     credits = Column(Integer, nullable=False, default=settings.DEFAULT_CREDITS) #!Warning: менять значение только с помощью методов из crud.py
     credits_last_update = Column(Integer, nullable=False, default=utils_base.now_timestamp)
