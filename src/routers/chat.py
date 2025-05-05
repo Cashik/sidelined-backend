@@ -4,19 +4,20 @@ from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc
+import logging
+import json
+import jsonschema
+from jsonschema import validate, ValidationError
+import time
 
-from src import schemas, enums, models, crud, utils
+from src import schemas, enums, models, crud, utils, utils_base
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
 from src.config import settings
 from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
 from src.services import user_context_service
 
-import logging
-import json
-import jsonschema
-from jsonschema import validate, ValidationError
-import time
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -228,49 +229,6 @@ async def stream_and_collect_messages(
 
     return
 
-@router.post("/message", response_model=CreateMessageResponse)
-async def create_message(
-    create_message_request: UserMessageCreateRequest,
-    background_tasks: BackgroundTasks,
-    user: models.User = Depends(get_current_user),
-    available_balance: bool = Depends(check_balance_and_update_token),
-    db: Session = Depends(get_session),
-):
-    # добавляем сообщение пользователя в чат
-    # если не указывать chat_id, то создаётся новый чат
-    
-    # Если это новый чат 
-    if create_message_request.chat_id is None:
-        # запускаем фоновую задачу обработки контекста пользователя
-        background_tasks.add_task(
-            user_context_service.update_user_information,
-            user_id=user.id
-        )
-        # создаём новый чат
-        title = create_message_request.message.strip()[:30] + "..." if len(create_message_request.message) > 30 else create_message_request.message
-        chat = await crud.create_chat(db, user.id, title)
-        create_message_request.chat_id = chat.id
-    else:
-        # если чат существует, то получаем все сообщения до данного юзером nonce
-        # если nonce указан, то получаем все сообщения до данного nonce
-        if create_message_request.nonce:
-            chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, to_nonce=create_message_request.nonce-1)
-        else:
-            chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id)
-
-
-    # собираем все данные для генерации ответа
-    assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat, db)
-    
-    # генерируем ответ от ИИ
-    answer_messages: List[schemas.MessageUnion] = await utils.get_ai_answer(assistant_generate_data, user.id, db)
-    
-    # добавляем новые сообщения в чат
-    new_messages: List[schemas.MessageUnion] = [user_message] + answer_messages
-    chat: schemas.Chat = await crud.add_chat_messages(db, create_message_request.chat_id, new_messages, user.id)
-    
-    return CreateMessageResponse(chat=chat, answer_message=answer_messages[-1])
-
 @router.post("/message/regenerate", response_model=CreateMessageResponse)
 async def regenerate_message(
     request: RegenerateMessageRequest,
@@ -292,6 +250,14 @@ async def create_message_stream(
     from src.mcp_servers import mcp_servers as mcp_servers_list
     from langchain_mcp_adapters.client import MultiServerMCPClient
     
+    # Пытаемся списать кредиты
+    try:
+        # Обновляем баланс кредитов перед началом генерации
+        await crud.refresh_user_credits(db, user)
+        await crud.change_user_credits(db, user.id, -1)
+    except Exception as e:
+        logger.error(f"Ошибка списания кредитов: {e}", exc_info=True)
+        raise HTTPException(status_code=403, detail=f"You run out of credits. Wait for next day to continue.")
     
     # Если это новый чат 
     if create_message_request.chat_id is None:
@@ -333,7 +299,7 @@ async def create_message_stream(
     return StreamingResponse(wrapped_stream(), media_type="text/event-stream")
 
 @router.post("/delete", response_model=DeleteResponse)
-async def delete_message(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     await crud.delete_chat(db, request.chat_id, user.id)
     return DeleteResponse()
 
@@ -357,7 +323,7 @@ async def get_tools():
 
 class CallToolRequest(BaseModel):
     chat_id: Optional[int] = None
-    toolbox_name: str = "Thirdweb"
+    toolbox_name: str
     tool_name: str
     input: Dict[str, Any]
     

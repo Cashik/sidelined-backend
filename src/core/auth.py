@@ -1,9 +1,9 @@
 import jwt
-import time
 from typing import Optional, Dict, Any
 
 from src.config import settings
 from src.schemas import TokenPayload
+from src import utils_base
 
 def create_token(payload: TokenPayload, expires_delta: Optional[int] = None) -> str:
     """
@@ -11,7 +11,7 @@ def create_token(payload: TokenPayload, expires_delta: Optional[int] = None) -> 
     """
     to_encode = payload.model_dump()
     jwt_settings = settings.get_jwt_settings()
-    current_time = int(time.time())
+    current_time = utils_base.now_timestamp()
     expiration_time = current_time + (expires_delta or jwt_settings["access_token_expire_minutes"] * 60)
     to_encode.update({
         "exp": expiration_time,

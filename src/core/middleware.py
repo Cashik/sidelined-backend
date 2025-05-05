@@ -3,12 +3,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
 from typing import Optional
 from sqlalchemy.orm import Session
-import time
 
 from src.config import settings
 from src.core.auth import decode_token, create_token
 from src.database import get_session
-from src import models, crud, utils, schemas
+from src import models, crud, utils, schemas, utils_base
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +135,7 @@ async def check_balance_and_update_token(
     # проверяем последнюю проверку
     check_success: bool = payload["balance_check_success"]
     check_time: int = payload["balance_check_time"]
-    current_time: int = int(time.time())
+    current_time: int = utils_base.now_timestamp()
     if check_success and (current_time - check_time) < settings.BALANCE_CHECK_LIFETIME_SECONDS:
         logger.info(f"Balance check successful {payload}")
         return True

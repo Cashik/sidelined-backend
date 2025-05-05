@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     
     # Chat settings
-    MAX_DAILY_MESSAGES: int = 10
+    DEFAULT_CREDITS: int = 100  # или любое другое дефолтное значение
     DEFAULT_CHAT_CONTEXT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
     DEFAULT_AI_MODEL: enums.Model = enums.Model.GPT_4O
     
@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     THIRDWEB_MCP_SSE_URL: str | None = None
     SMITHERY_API_KEY: str | None = None
     EXA_SEARCH_API_KEY: str | None = None
+    
     
     @validator('TOKEN_REQUIREMENTS')
     def validate_token_requirements(cls, v):

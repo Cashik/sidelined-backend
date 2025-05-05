@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
-from sqlalchemy import select, delete, or_, and_, func, desc
+from sqlalchemy import select, delete, or_, and_, func, desc, update
 from sqlalchemy.orm import Session
-from src import models, schemas, enums, exceptions
+from sqlalchemy.exc import IntegrityError
+import time
+
+from src import models, schemas, enums, exceptions, utils_base
+from src.config import settings
 
 import logging
 
@@ -463,5 +467,32 @@ async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[m
         models.Message.type == enums.MessageType.TEXT
     )
     return session.execute(stmt).scalars().all()
+
+async def change_user_credits(db, user_id: int, amount: int):
+    """
+    Атомарно списывает (или добавляет) кредиты пользователю.
+    Если amount < 0 — списание, если > 0 — пополнение.
+    """
+    result = db.execute(
+        update(models.User)
+        .where(models.User.id == user_id)
+        .values(credits=models.User.credits + amount)
+    )
+    db.commit()
+    if result.rowcount == 0:
+        raise Exception("Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
+
+async def refresh_user_credits(db, user: models.User):
+    """
+    Обновляет баланс кредитов пользователя если прошло больше 24 часов с последнего обновления
+    """
+    if user.credits_last_update is None or user.credits_last_update < utils_base.now_timestamp() - 60*60*24:
+        db.execute(
+            update(models.User)
+            .where(models.User.id == user.id)
+            .values(credits=settings.DEFAULT_CREDITS, credits_last_update=utils_base.now_timestamp())
+        )
+        db.commit()
+
 
 

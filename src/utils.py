@@ -16,14 +16,13 @@ from src.services import thirdweb_service
 from src.services.prompt_service import PromptService
 from src.providers import openai, gemini
 from src.mcp_servers import mcp_servers as mcp_servers_list
+from src.utils_base import now_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def now_timestamp():
-    """Получение текущего timestamp в секундах"""
-    return int(time.time())
+
 
 
 async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.MessageUnion]:

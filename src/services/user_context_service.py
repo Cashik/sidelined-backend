@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 import asyncio
 from datetime import datetime
 
-from src import models, crud, schemas, enums, utils
+from src import models, crud, schemas, enums, utils_base
 from src.config import settings
 from src.database import get_session
 from src.providers.gemini import GeminiProvider, GeminiNotesResponse
@@ -31,7 +31,7 @@ async def test_background_task(user_id: int, message: str):
     session = next(get_session())
     try:
         # Здесь можно добавить тестовый факт, чтобы проверить работу
-        test_facts = [f"Тестовый факт: {message} (создан в {utils.now_timestamp()})"]
+        test_facts = [f"Тестовый факт: {message} (создан в {utils_base.now_timestamp()})"]
         await crud.add_user_facts(user_id, test_facts, session)
         logger.info(f"Added test fact for user_id={user_id}")
     except Exception as e:

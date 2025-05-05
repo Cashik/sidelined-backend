@@ -4,13 +4,10 @@ from pydantic import BaseModel, Field, ConfigDict, TypeAdapter, field_validator
 from datetime import datetime
 import time
 
-from src import enums
+from src import enums, utils_base
 import logging
 
 logger = logging.getLogger(__name__)
-def now_timestamp():
-    """Получение текущего timestamp в секундах"""
-    return int(time.time())
 
 
 # апи-схемы роутера auth
@@ -70,6 +67,7 @@ class UserChatSettings(BaseModel):
 
 class User(BaseModel):
     profile: UserProfile
+    credits: int
     chat_settings: UserChatSettings
     connected_wallets: List[WalletAddress]
 
@@ -153,8 +151,8 @@ class MessageBase(BaseModel):
     sender: enums.Role
     recipient: enums.Role
     nonce: int
-    created_at: int = Field(default_factory=now_timestamp)
-    selected_at: int = Field(default_factory=now_timestamp)
+    created_at: int = Field(default_factory=utils_base.now_timestamp)
+    selected_at: int = Field(default_factory=utils_base.now_timestamp)
     generation_time_ms: int = 0
     
     model_config = ConfigDict(from_attributes = True)

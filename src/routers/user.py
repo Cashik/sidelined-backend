@@ -42,6 +42,7 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
     facts = [schemas.UserFact(id=fact.id, description=fact.description, created_at=fact.created_at) for fact in user.facts]
     wallet_addresses = [schemas.WalletAddress(address=wallet.address, created_at=wallet.created_at) for wallet in user.wallet_addresses]
     return schemas.User(
+        credits=user.credits,
         profile=schemas.UserProfile(
             preferred_name=user.preferred_name, 
             user_context=user.user_context,

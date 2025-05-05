@@ -5,7 +5,7 @@ import time
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from src import crud, schemas, utils
+from src import crud, schemas, utils, utils_base
 from src.core.crypto import verify_signature, validate_payload
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
@@ -50,15 +50,16 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     # Создаем токен
     token_payload = schemas.TokenPayload(
         user_id=user.id,
-        balance_check_time=int(time.time()),
+        balance_check_time=utils_base.now_timestamp(),
         balance_check_success=balance_check_success
     )
     token = create_token(token_payload)
     
-    # Логируем информацию о пользователе
-    address = user.wallet_addresses[0].address if user.wallet_addresses else "no address"
-    logger.info(f"User is logged in: {user.id} ({address})")
+    # Обновляем баланс кредитов
+    await crud.refresh_user_credits(db, user)
     
+    # Логируем информацию о пользователе
+    logger.info(f"User is logged in: {user.id} ({user.wallet_addresses[0].address})")
     return schemas.LoginResponse(
         access_token=token,
         token_type="bearer",
@@ -78,7 +79,8 @@ async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
     # Генерация уникального nonce
     nonce = str(uuid.uuid4())
     # Текущее время в миллисекундах для срока действия
-    expiration_time = int(time.time() * 1000) + 1000 * 60 * 5  # 5 минут срок действия
+    # TODO: сделать срок действия в настройках
+    expiration_time = utils_base.now_timestamp() + 60 * 5  # 5 минут срок действия
     # Структура payload в соответствии с требованиями thirdweb
     payload = schemas.LoginPayload(
         domain=DOMAIN,
@@ -89,7 +91,7 @@ async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
         chain_id=payload_request.chainId,
         nonce=nonce,
         issued_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-        expiration_time=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(expiration_time / 1000)),
+        expiration_time=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(expiration_time)),
     )
     
     
