@@ -19,7 +19,7 @@ if settings.THIRDWEB_MCP_SSE_URL:
         )
     )
 
-if settings.EXA_SEARCH_API_KEY and settings.SMITHERY_API_KEY:
+if settings.EXA_SEARCH_API_KEY and settings.SMITHERY_API_KEY and False:
     exa_search_url = smithery.create_smithery_url("wss://server.smithery.ai/exa/ws", {
         "exaApiKey": settings.EXA_SEARCH_API_KEY
     }) + f"&api_key={settings.SMITHERY_API_KEY}"
