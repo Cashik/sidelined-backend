@@ -136,8 +136,6 @@ async def stream_and_collect_messages(
     """
     new_messages: List[schemas.MessageUnion] = [user_message]
     next_nonce = user_message.nonce + 1
-    # хранение промежуточного результата вызова
-    starts_of_events = dict() # id -> timestamp
     
     try:
         async for sse_event in event_generator:
@@ -147,13 +145,10 @@ async def stream_and_collect_messages(
                 logger.info(f"Событие: {event_type} {data}")
                 # Собираем tool-calls
                 if event_type == "tool_call":
-                    # Запоминаем, что был вызов инструмента
-                    starts_of_events[data.get("id")] = time.time()
-                    
+                    pass
                 elif event_type == "tool_result":
-                    start = starts_of_events.get(data.get("id"))
-                    execution_time_ms = int((time.time() - start) * 1000) if start else 0
-                    starts_of_events.pop(data.get("id"), None)
+                    # Используем время из события, если оно есть
+                    execution_time_ms = data.get("generation_time_ms", 0)
                     output = data.get("output")
                     logger.info(f"Тип output: {type(output)}, значение: {output}")
                     if isinstance(output, str):
@@ -175,14 +170,11 @@ async def stream_and_collect_messages(
                     ))
                     next_nonce += 1
                 elif event_type == "message_start":
-                    # запоминаем время начала генерации
-                    starts_of_events[data.get("id")] = time.time()
+                    pass
                 elif event_type == "message_end":
                     # модель закончила отвечать
                     answer_text = data.get("text", "")
-                    start = starts_of_events.get(data.get("id"))
-                    execution_time_ms = int((time.time() - start) * 1000) if start else 0
-                    starts_of_events.pop(data.get("id"), None)
+                    execution_time_ms = data.get("generation_time_ms")
                     # запоминаем сообщение, если оно не пустое
                     if answer_text:
                         new_messages.append(schemas.ChatMessage(
@@ -196,8 +188,6 @@ async def stream_and_collect_messages(
                             )
                         ))
                         next_nonce += 1
-                        
-                logger.info(f"starts_of_events: {starts_of_events}")
                 
             except Exception as e:
                 logger.error(f"Ошибка при сборе сообщений: {e}", exc_info=True)
@@ -217,10 +207,6 @@ async def stream_and_collect_messages(
             )
         ))
         next_nonce += 1
-    
-    
-    if len(starts_of_events) > 0:
-        logger.error(f"Не завершенные события: {starts_of_events}")
     
     logger.info(f"Сохраняем сообщения в базу: {new_messages}")
     try:
