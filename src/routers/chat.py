@@ -188,7 +188,6 @@ async def stream_and_collect_messages(
                             )
                         ))
                         next_nonce += 1
-                
             except Exception as e:
                 logger.error(f"Ошибка при сборе сообщений: {e}", exc_info=True)
             finally:
@@ -196,7 +195,7 @@ async def stream_and_collect_messages(
                 yield sse_event
     except Exception as e:
         logger.error(f"Ошибка генерации: {e}", exc_info=True)
-        error_message = f"Generation was interrupted: {str(e)}" if settings.DEBUG else "Generation was interrupted"
+        error_message = f"Generation error: {str(e)}" if settings.DEBUG else "Generation error."
         new_messages.append(schemas.ChatMessage(
             sender=enums.Role.SYSTEM,
             recipient=enums.Role.USER,
@@ -206,7 +205,16 @@ async def stream_and_collect_messages(
                 settings=user_message.content.settings # те же настройки, что и у пользователя
             )
         ))
-        next_nonce += 1
+        try:
+            yield utils.to_sse("message_start", {"id": next_nonce})
+            yield utils.to_sse("message_chunk", {"id": next_nonce, "text": error_message})
+            yield utils.to_sse("message_end", {"id": next_nonce, "text": error_message, "generation_time_ms": 0})
+            yield utils.to_sse("generation_end", {})
+        except Exception as e:
+            logger.error(f"Ошибка при отправке события: {e}", exc_info=True)
+            # если не удалось отправить событие, то не сохраняем сообщения в и сразу выходим
+            return
+
     
     logger.info(f"Сохраняем сообщения в базу: {new_messages}")
     try:

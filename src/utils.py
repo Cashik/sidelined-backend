@@ -300,60 +300,68 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
         yield to_sse("generation_start", {"chat_id": prompt_service.generate_data.chat.id})
         cur_msg_id = None # для группировки чанков
         starts_of_events = dict()  # id -> timestamp
-        async for ev in executor.astream_events(
-            {"chat_history": messages}
-        ):
-            kind = ev["event"]
+        
+        try:
+            async for ev in executor.astream_events(
+                {"chat_history": messages}
+            ):
+                kind = ev["event"]
 
-            # 1. начало нового assistant-сообщения
-            if kind == "on_chat_model_start":
-                cur_msg_id = ev["run_id"]
-                starts_of_events[cur_msg_id] = time.time()
-                yield to_sse("message_start", {"id": cur_msg_id})
+                # 1. начало нового assistant-сообщения
+                if kind == "on_chat_model_start":
+                    cur_msg_id = ev["run_id"]
+                    starts_of_events[cur_msg_id] = time.time()
+                    yield to_sse("message_start", {"id": cur_msg_id})
 
-            # 2. токены
-            elif kind == "on_chat_model_stream":
-                ch = ev["data"]["chunk"]
-                if ch.content:                       # пропускаем tool-JSON
-                    yield to_sse("message_chunk",{"id": cur_msg_id, "text": ch.content})
+                # 2. токены
+                elif kind == "on_chat_model_stream":
+                    ch = ev["data"]["chunk"]
+                    if ch.content:                       # пропускаем tool-JSON
+                        yield to_sse("message_chunk",{"id": cur_msg_id, "text": ch.content})
 
-            # 3. конец сообщения
-            elif kind == "on_chat_model_end":
-                logger.info(f"on_chat_model_end: {ev}")
-                answer = ev["data"]["output"].content
-                start = starts_of_events.get(cur_msg_id)
-                generation_time_ms = int((time.time() - start) * 1000) if start else 0
-                starts_of_events.pop(cur_msg_id, None)
-                yield to_sse("message_end", {"id": cur_msg_id, "text": answer, "generation_time_ms": generation_time_ms})
-                cur_msg_id = None                    # сброс
+                # 3. конец сообщения
+                elif kind == "on_chat_model_end":
+                    logger.info(f"on_chat_model_end: {ev}")
+                    answer = ev["data"]["output"].content
+                    start = starts_of_events.get(cur_msg_id)
+                    generation_time_ms = int((time.time() - start) * 1000) if start else 0
+                    starts_of_events.pop(cur_msg_id, None)
+                    yield to_sse("message_end", {"id": cur_msg_id, "text": answer, "generation_time_ms": generation_time_ms})
+                    cur_msg_id = None                    # сброс
 
-            # 4. начало вызова инструмента
-            elif kind == "on_tool_start":
-                logger.info(f"on_tool_start: {ev}")
-                tool_name = ev["name"]
-                tool_input = ev["data"]["input"]
-                starts_of_events[ev["run_id"]] = time.time()
-                yield to_sse("tool_call",{
-                    "id": ev["run_id"],
-                    "name": tool_name,
-                    "args": tool_input
-                })
+                # 4. начало вызова инструмента
+                elif kind == "on_tool_start":
+                    logger.info(f"on_tool_start: {ev}")
+                    tool_name = ev["name"]
+                    tool_input = ev["data"]["input"]
+                    starts_of_events[ev["run_id"]] = time.time()
+                    yield to_sse("tool_call",{
+                        "id": ev["run_id"],
+                        "name": tool_name,
+                        "args": tool_input
+                    })
 
-            # 5. результат инструмента
-            elif kind == "on_tool_end":
-                logger.info(f"on_tool_end: {ev}")
-                start = starts_of_events.get(ev["run_id"])
-                generation_time_ms = int((time.time() - start) * 1000) if start else 0
-                starts_of_events.pop(ev["run_id"], None)
-                yield to_sse("tool_result",{
-                    "id": ev["run_id"],
-                    "name": ev["name"],
-                    "args": ev["data"]["input"],
-                    "output": ev["data"]["output"],
-                    "generation_time_ms": generation_time_ms
-                })
-
-        yield to_sse("generation_end", {})
+                # 5. результат инструмента
+                elif kind == "on_tool_end":
+                    logger.info(f"on_tool_end: {ev}")
+                    start = starts_of_events.get(ev["run_id"])
+                    generation_time_ms = int((time.time() - start) * 1000) if start else 0
+                    starts_of_events.pop(ev["run_id"], None)
+                    yield to_sse("tool_result",{
+                        "id": ev["run_id"],
+                        "name": ev["name"],
+                        "args": ev["data"]["input"],
+                        "output": ev["data"]["output"],
+                        "generation_time_ms": generation_time_ms
+                    })
+        except Exception as e:
+            logger.error(f"Error generating AI response: {e}", exc_info=True)
+            error_message = f"Sorry, but some error occurred and I can't fully answer your request. Try to use other model or ask another question."
+            if settings.DEBUG:
+                error_message += f"\nDebug info:{os.linesep}{str(e)}"
+            yield to_sse("message_end", {"id": cur_msg_id, "text": error_message, "generation_time_ms": 0})
+        finally:
+            yield to_sse("generation_end", {})
 
         
         
