@@ -379,7 +379,7 @@ async def call_tool(
         logger.info(f"Calling tool {request.tool_name} with input {request.input}")
         start_time = time.time()
         
-        result = await mcp_client.invoke_tool(request.tool_name, request.input)
+        result: Dict[str, Any] = await mcp_client.invoke_tool(request.tool_name, request.input)
         
         execution_time_ms = int((time.time() - start_time) * 1000)
         logger.info(f"Tool {request.tool_name} called successfully in {execution_time_ms} ms")

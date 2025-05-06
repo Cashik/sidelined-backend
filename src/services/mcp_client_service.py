@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 from typing import Dict, Any, List, Optional
@@ -44,7 +45,10 @@ class MCPClient:
                 return {"text": f"Error occurred while invoking tool: {result.content[0].text}"}
             else:
                 if result.content[0].type == 'text':
-                    return {"text": result.content[0].text}
+                    try:
+                        return json.loads(result.content[0].text)
+                    except Exception:
+                        return {"raw": result.content[0].text}
                 else:
                     return {"text": "Unsupported content type received from MCP"}
 
