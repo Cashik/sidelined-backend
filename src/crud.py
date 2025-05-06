@@ -201,7 +201,7 @@ async def add_chat_messages(db: Session, chat_id: int, messages: List[schemas.Me
         
         db.commit()
     except Exception as e:
-        raise exceptions.AddMessageException(f"Error adding message: {str(e)}")
+        raise exceptions.AddMessageError()
     
     return await get_user_chat(db, chat_id, user_id)
     
@@ -262,14 +262,13 @@ async def update_user_chat_settings(
 
 
 async def update_user_profile(
-    user_id: int,
+    user: models.User,
     profile: schemas.UserProfile,
     session: Session
 ) -> models.User:
     """
     Обновление профиля пользователя
     """
-    user = await get_user_by_id(user_id, session)
     if not user:
         raise exceptions.UserNotFoundException()
     
@@ -283,20 +282,19 @@ async def update_user_profile(
     return user
 
 async def add_user_facts(
-    user_id: int,
+    user: models.User,
     facts: List[str],
     session: Session
 ) -> Tuple[models.User, List[str]]:
     """
     Добавление новых фактов о пользователе разом
     """
-    user = await get_user_by_id(user_id, session)
     if not user:
         raise exceptions.UserNotFoundException()
     
     # Создаем новые факты
     new_facts = [models.UserFact(
-        user_id=user_id,
+        user_id=user.id,
         description=fact
     ) for fact in facts]
 
@@ -307,14 +305,13 @@ async def add_user_facts(
 
 
 async def delete_user_facts(
-    user_id: int,
+    user: models.User,
     fact_ids: List[int],
     session: Session
 ) -> Tuple[models.User, List[str]]:
     """
     Удаление фактов о пользователе
     """
-    user = await get_user_by_id(user_id, session)
     if not user:
         raise exceptions.UserNotFoundException()
 
@@ -324,7 +321,7 @@ async def delete_user_facts(
         # Проверяем, принадлежит ли факт пользователю
         fact_stmt = select(models.UserFact).where(
             models.UserFact.id == fact_id,
-            models.UserFact.user_id == user_id
+            models.UserFact.user_id == user.id
         )
         fact = session.execute(fact_stmt).scalar_one_or_none()
         
@@ -341,24 +338,10 @@ async def delete_user_facts(
 
 
 async def add_user_address(
-    user_id: int,
+    user: models.User,
     address: str,
     session: Session
 ) -> models.WalletAddress:
-    """
-    Добавление нового адреса кошелька пользователю
-    
-    Args:
-        user_id: ID пользователя
-        address: Адрес кошелька (будет преобразован в lowercase)
-        session: Сессия базы данных
-        
-    Returns:
-        WalletAddress: Созданный адрес кошелька
-        
-    Raises:
-        exceptions.AddressAlreadyExistsException: Если адрес уже существует в системе
-    """
     # Проверяем, существует ли адрес в системе
     stmt = select(models.WalletAddress).where(
         models.WalletAddress.address == address.lower()
@@ -370,7 +353,7 @@ async def add_user_address(
     
     # Создаем новый адрес
     wallet = models.WalletAddress(
-        user_id=user_id,
+        user_id=user.id,
         address=address.lower()
     )
     session.add(wallet)
@@ -380,7 +363,7 @@ async def add_user_address(
     return wallet
 
 async def delete_user_address(
-    user_id: int,
+    user: models.User,
     address: str,
     session: Session
 ) -> None:
@@ -393,42 +376,40 @@ async def delete_user_address(
         session: Сессия базы данных
         
     Raises:
-        exceptions.AddressNotFoundException: Если адрес не найден
-        exceptions.LastAddressException: Если это последний адрес пользователя
+        exceptions.AddressNotFoundError: Если адрес не найден
+        exceptions.LastAddressError: Если это последний адрес пользователя
     """
     # Получаем адрес
     stmt = select(models.WalletAddress).where(
         models.WalletAddress.address == address.lower(),
-        models.WalletAddress.user_id == user_id
+        models.WalletAddress.user_id == user.id
     )
     wallet = session.execute(stmt).scalar_one_or_none()
     
     if not wallet:
-        raise exceptions.AddressNotFoundException()
+        raise exceptions.AddressNotFoundError()
     
     # Проверяем, не последний ли это адрес пользователя
     stmt = select(func.count()).where(
-        models.WalletAddress.user_id == user_id
+        models.WalletAddress.user_id == user.id
     )
     address_count = session.execute(stmt).scalar_one()
     
     if address_count <= 1:
-        raise exceptions.LastAddressException()
+        raise exceptions.LastAddressError()
     
     # Удаляем адрес
     session.delete(wallet)
     session.commit()
 
 
-async def delete_user(user_id: int, session: Session) -> None:
+async def delete_user(user: models.User, session: Session) -> None:
     """
     Полностью удаляет пользователя и все связанные с ним данные:
     - Чаты и сообщения
     - Факты о пользователе
     - Адреса кошельков
     """
-    # Получаем пользователя
-    user = await get_user_by_id(user_id, session)
     if not user:
         raise exceptions.UserNotFoundException()
     
@@ -448,7 +429,7 @@ async def delete_user(user_id: int, session: Session) -> None:
     session.delete(user)
     session.commit()
 
-async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[models.Message]:
+async def get_user_messages_to_analyze(user: models.User, session: Session) -> List[models.Message]:
     """
     Получение сообщений пользователя, которые не были проанализированы.
     Сложный запрос включает в себя получение всех сообщений во всех видимых чатах пользователя, nonce которых больше чем last_analysed_nonce этого чата.
@@ -456,7 +437,7 @@ async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[m
     stmt = select(models.Message).where(
         models.Message.chat_id.in_(
             select(models.Chat.id).where(
-                models.Chat.user_id == user_id,
+                models.Chat.user_id == user.id,
                 models.Chat.visible == True
             )
         ),
@@ -466,19 +447,19 @@ async def get_user_messages_to_analyze(user_id: int, session: Session) -> List[m
     )
     return session.execute(stmt).scalars().all()
 
-async def change_user_credits(db, user_id: int, amount: int):
+async def change_user_credits(db, user: models.User, amount: int):
     """
     Атомарно списывает (или добавляет) кредиты пользователю.
     Если amount < 0 — списание, если > 0 — пополнение.
     """
     result = db.execute(
         update(models.User)
-        .where(models.User.id == user_id)
+        .where(models.User.id == user.id)
         .values(credits=models.User.credits + amount)
     )
     db.commit()
     if result.rowcount == 0:
-        raise Exception("Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
+        raise exceptions.BusinessError(code="change_credits_failed", message="Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
 
 async def refresh_user_credits(db, user: models.User):
     """

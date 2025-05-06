@@ -10,11 +10,10 @@ import jsonschema
 from jsonschema import validate, ValidationError
 import time
 
-from src import schemas, enums, models, crud, utils, utils_base
+from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
 from src.config import settings
-from src.exceptions import MessageNotFoundException, InvalidMessageTypeException
 from src.services import user_context_service
 
 
@@ -82,7 +81,6 @@ async def user_to_assistant_generate_data(user: models.User, create_message_requ
             )
         )
     )
-    
     chat_settings = schemas.GenerateMessageSettings(
         model=model,
         chat_style=create_message_request.chat_style,
@@ -147,11 +145,11 @@ async def stream_and_collect_messages(
                 data = json.loads(sse_event[5:])
                 event_type = data.get("type")
                 logger.info(f"Событие: {event_type} {data}")
-                logger.info(f"starts_of_events: {starts_of_events}")
                 # Собираем tool-calls
                 if event_type == "tool_call":
                     # Запоминаем, что был вызов инструмента
                     starts_of_events[data.get("id")] = time.time()
+                    
                 elif event_type == "tool_result":
                     start = starts_of_events.get(data.get("id"))
                     execution_time_ms = int((time.time() - start) * 1000) if start else 0
@@ -198,6 +196,9 @@ async def stream_and_collect_messages(
                             )
                         ))
                         next_nonce += 1
+                        
+                logger.info(f"starts_of_events: {starts_of_events}")
+                
             except Exception as e:
                 logger.error(f"Ошибка при сборе сообщений: {e}", exc_info=True)
             finally:
@@ -254,10 +255,12 @@ async def create_message_stream(
     try:
         # Обновляем баланс кредитов перед началом генерации
         await crud.refresh_user_credits(db, user)
-        await crud.change_user_credits(db, user.id, -1)
+        await crud.change_user_credits(db, user, -1)
+    except exceptions.BusinessError as e:
+        raise exceptions.APIError(code=e.code, message=e.message, status_code=403)
     except Exception as e:
         logger.error(f"Ошибка списания кредитов: {e}", exc_info=True)
-        raise HTTPException(status_code=403, detail=f"You run out of credits. Wait for next day to continue.")
+        raise exceptions.APIError(code="credit_deduction_failed", message="Out of credits. Try again later.", status_code=500)
     
     # Если это новый чат 
     if create_message_request.chat_id is None:
@@ -267,16 +270,24 @@ async def create_message_stream(
             user_id=user.id
         )
         # создаём новый чат
-        title = create_message_request.message.strip()[:30] + "..." if len(create_message_request.message) > 30 else create_message_request.message
-        chat: schemas.Chat = await crud.create_chat(db, user.id, title)
-        create_message_request.chat_id = chat.id
+        try:
+            title = create_message_request.message.strip()[:30] + "..." if len(create_message_request.message) > 30 else create_message_request.message
+            chat: schemas.Chat = await crud.create_chat(db, user.id, title)
+            create_message_request.chat_id = chat.id
+        except Exception as e:
+            logger.error(f"Ошибка создания чата: {e}", exc_info=True)
+            raise exceptions.APIError(code="chat_creation_failed", message="Failed to create new chat", status_code=500)
     else:
         # если чат существует, то получаем все сообщения до данного юзером nonce
         # если nonce указан, то получаем все сообщения до данного nonce
-        if create_message_request.nonce:
-            chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, to_nonce=create_message_request.nonce-1)
-        else:
-            chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id)
+        try:
+            if create_message_request.nonce:
+                chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, to_nonce=create_message_request.nonce-1)
+            else:
+                chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id)
+        except Exception as e:
+            logger.error(f"Ошибка получения чата: {e}", exc_info=True)
+            raise exceptions.APIError(code="chat_retrieval_failed", message="Failed to retrieve chat history", status_code=500)
 
     # собираем все данные для генерации ответа
     assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat, db)
@@ -344,25 +355,25 @@ async def call_tool(
     # Валидируем наличие тулбокса
     toolbox = next((tb for tb in toolboxes if tb.name == request.toolbox_name), None)
     if not toolbox:
-        raise HTTPException(status_code=404, detail=f"Toolbox {request.toolbox_name} not found")
+        raise exceptions.APIError(code="toolbox_not_found", message=f"Toolbox {request.toolbox_name} not found", status_code=404)
     
     # Валидируем наличие тула в тулбоксе
     tool = next((tool for tool in toolbox.tools if tool.name == request.tool_name), None)
     if not tool:
-        raise HTTPException(status_code=404, detail=f"Tool {request.tool_name} not found in toolbox {request.toolbox_name}")
+        raise exceptions.APIError(code="tool_not_found", message=f"Tool {request.tool_name} not found in toolbox {request.toolbox_name}", status_code=404)
     
     # Валидируем входные параметры на основе схемы
     try:
         validate_tool_input(tool.inputSchema, request.input)
     except ValidationError as e:
         logger.error(f"Validation error for tool {request.tool_name}: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Invalid input parameters: {str(e)}")
+        raise exceptions.APIError(code="invalid_input_parameters", message=f"Invalid input parameters: {str(e)}", status_code=400)
     
     # Получаем сервер для выбранного тулбокса
     from src.mcp_servers import mcp_servers
     server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
     if not server:
-        raise HTTPException(status_code=500, detail=f"Server configuration for {request.toolbox_name} not found")
+        raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)
     
     # Инициализируем клиент MCP
     from src.services.mcp_client_service import MCPClient
@@ -380,7 +391,7 @@ async def call_tool(
         logger.info(f"Tool {request.tool_name} called successfully in {execution_time_ms} ms")
     except Exception as e:
         logger.error(f"Error calling tool {request.tool_name}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error calling tool: {str(e)}")
+        raise exceptions.APIError(code="tool_call_failed", message=f"Error calling tool: {str(e)}", status_code=500)
 
     # Пытаемся сохранить сообщение в базу
     try:
@@ -406,9 +417,11 @@ async def call_tool(
             generation_time_ms=execution_time_ms,
         )
         await crud.add_chat_messages(db, request.chat_id, [tool_message], user.id)
+    except exceptions.BusinessError as e:
+        raise exceptions.APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
         logger.error(f"Error adding message: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error saving message: {str(e)}")
+        raise exceptions.APIError(code="message_save_failed", message=f"Error saving message: {str(e)}", status_code=500)
 
     return CallToolResponse(result=tool_message, chat=chat)
 

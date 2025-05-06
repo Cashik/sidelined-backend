@@ -14,30 +14,6 @@ from src.providers.gemini import GeminiProvider, GeminiNotesResponse
 logger = logging.getLogger(__name__)
 
 
-async def test_background_task(user_id: int, message: str):
-    """
-    Тестовая фоновая задача для проверки работы BackgroundTasks.
-    
-    Args:
-        user_id: ID пользователя
-        message: Тестовое сообщение
-    """
-    # Задержка для имитации длительной работы
-    await asyncio.sleep(5)
-    
-    logger.info(f"Test background task executed: user_id={user_id}, message={message}")
-    
-    # Используем новую сессию
-    session = next(get_session())
-    try:
-        # Здесь можно добавить тестовый факт, чтобы проверить работу
-        test_facts = [f"Тестовый факт: {message} (создан в {utils_base.now_timestamp()})"]
-        await crud.add_user_facts(user_id, test_facts, session)
-        logger.info(f"Added test fact for user_id={user_id}")
-    except Exception as e:
-        logger.error(f"Error in test background task: {str(e)}")
-    finally:
-        session.close() 
 
 async def update_user_information(user_id: int):
     """
@@ -102,12 +78,12 @@ async def update_user_information(user_id: int):
         
         # Удаляем выбранные заметки
         if gemini_response.delete_notes:
-            deleted_facts = await crud.delete_user_facts(user_id, gemini_response.delete_notes, session)
+            deleted_facts = await crud.delete_user_facts(user, gemini_response.delete_notes, session)
             result["deleted_notes"] = deleted_facts
         
         # Добавляем новые заметки
         if gemini_response.new_notes:
-            _, added_facts = await crud.add_user_facts(user_id, gemini_response.new_notes, session)
+            _, added_facts = await crud.add_user_facts(user, gemini_response.new_notes, session)
             result["added_notes"] = added_facts
         
         # Обновляем last_analysed_nonce для всех чатов с новыми сообщениями

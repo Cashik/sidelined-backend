@@ -9,7 +9,9 @@ from src.core.crypto import verify_signature, validate_payload
 from src.core.middleware import get_current_user
 from src.database import get_session
 from src.config import settings
-from src.services import user_context_service
+from src.exceptions import (
+    AddressAlreadyExistsError, AddressNotFoundError, LastAddressError, FactNotFoundError, APIError
+)
 
 router = APIRouter(prefix="/user", tags=["User"])
 
@@ -63,9 +65,8 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
 
 
 @router.get("/me", response_model=schemas.User)
-async def get_user(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    user_data: models.User = await crud.get_user_by_id(user.id, db)
-    return db_user_to_schema_user(user_data)
+async def get_user(user: models.User = Depends(get_current_user)):
+    return db_user_to_schema_user(user)
 
 @router.get("/settings/chat", response_model=AvailableSettingsResponse)
 async def get_available_settings():
@@ -93,25 +94,25 @@ async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.
 
 @router.post("/settings/profile", response_model=schemas.User)
 async def update_user_settings(request: UserProfileUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    user_data: models.User = await crud.update_user_profile(user.id, request, db)
+    user_data: models.User = await crud.update_user_profile(user, request, db)
     return db_user_to_schema_user(user_data)
 
 
 @router.post("/facts/add", response_model=schemas.User)
 async def add_user_fact(request: UserFactAddRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    user_data: models.User = await crud.add_user_facts(user.id, [request.description], db)
+    user_data: models.User = await crud.add_user_facts(user, [request.description], db)
     return db_user_to_schema_user(user_data)
 
 
 @router.post("/facts/delete", response_model=schemas.User)
 async def delete_user_fact(request: UserFactDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     try:
-        user_data: models.User = await crud.delete_user_facts(user.id, [request.id], db)
+        user_data: models.User = await crud.delete_user_facts(user, [request.id], db)
         return db_user_to_schema_user(user_data)
-    except exceptions.FactNotFoundException:
-        raise HTTPException(status_code=400, detail="Fact not found")
+    except FactNotFoundError as e:
+        raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e) if settings.DEBUG else "Internal server error")
+        raise
 
 @router.post("/wallet/add", response_model=schemas.WalletAddress)
 async def add_wallet_address(
@@ -126,16 +127,16 @@ async def add_wallet_address(
     """
     # Проверяем валидность payload'а
     if not validate_payload(request.payload):
-        raise HTTPException(status_code=400, detail="Invalid payload")
+        raise APIError(code="invalid_payload", message="Некорректный payload", status_code=400)
     
     # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
-        raise HTTPException(status_code=401, detail="Invalid signature")
+        raise APIError(code="invalid_signature", message="Неверная подпись", status_code=401)
     
     try:
         # Добавляем адрес
         wallet = await crud.add_user_address(
-            user_id=user.id,
+            user=user,
             address=request.payload.address,
             session=db
         )
@@ -144,16 +145,10 @@ async def add_wallet_address(
             address=wallet.address,
             created_at=wallet.created_at
         )
-    except exceptions.AddressAlreadyExistsException:
-        raise HTTPException(
-            status_code=400,
-            detail="Address already exists"
-        )
+    except AddressAlreadyExistsError as e:
+        raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e) if settings.DEBUG else "Internal server error"
-        )
+        raise
 
 @router.post("/wallet/delete")
 async def delete_wallet_address(
@@ -168,26 +163,17 @@ async def delete_wallet_address(
     """
     try:
         await crud.delete_user_address(
-            user_id=user.id,
+            user=user,
             address=request.address,
             session=db
         )
         return {"status": "success"}
-    except exceptions.AddressNotFoundException:
-        raise HTTPException(
-            status_code=404,
-            detail="Address not found"
-        )
-    except exceptions.LastAddressException:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete the last address"
-        )
+    except AddressNotFoundError as e:
+        raise APIError(code=e.code, message=e.message, status_code=404)
+    except LastAddressError as e:
+        raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e) if settings.DEBUG else "Internal server error"
-        )
+        raise
 
 
 

@@ -257,3 +257,11 @@ class Toolbox(BaseModel):
     description: str
     tools: List[Tool]
 
+class APIErrorContent(BaseModel):
+    code: str
+    message: str
+    details: Optional[Any] = None
+
+class APIErrorResponse(BaseModel):
+    error: APIErrorContent
+

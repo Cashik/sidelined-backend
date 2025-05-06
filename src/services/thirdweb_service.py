@@ -68,7 +68,7 @@ class ThirdwebService():
             data = response.json()
         except Exception as e:
             logger.error(f"Error getting balances with params: {query_params} and error: {e}")
-            raise exceptions.ThirdwebServiceException()
+            raise exceptions.ThirdwebServiceError()
         
         request_balances = data["data"]
         result_balances = []

@@ -27,4 +27,5 @@ async def get_available(available_balance: bool = Depends(check_balance_and_upda
     """
     Отдельный эндпоинт, который можно использовать для перепроверки баланса
     """
+    # TODO: уязвимое место для DoS атак
     return AvailableResponse(available=available_balance)

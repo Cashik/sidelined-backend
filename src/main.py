@@ -11,22 +11,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from fastapi.exceptions import RequestValidationError
+from src.exceptions import BusinessError
+from pydantic import BaseModel
 
 from src.config import settings
 from src.database import get_session
 from src.models import *
 from src.routers import auth, chat, user, requirements
+from src.schemas import APIErrorContent, APIErrorResponse
+from src.exceptions import APIError
 
 app = FastAPI(
     title="2Eden API - Swagger UI",
     default_response_class=JSONResponse,
     prefix="/api"
 )
-
 
 @app.get("/health")
 async def health_check():
@@ -75,6 +79,71 @@ app.include_router(requirements.router)
 async def startup_event():
     import src.mcp_servers
     await src.mcp_servers.sync_toolboxes()
+
+@app.exception_handler(APIError)
+async def api_error_handler(request: Request, exc: APIError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=APIErrorResponse(
+            error=APIErrorContent(
+                code=exc.code,
+                message=exc.message,
+                details=exc.details
+            )
+        ).dict()
+    )
+
+@app.exception_handler(BusinessError)
+async def business_error_handler(request: Request, exc: BusinessError):
+    return JSONResponse(
+        status_code=400,
+        content=APIErrorResponse(
+            error=APIErrorContent(
+                code=exc.code,
+                message=exc.message,
+                details=exc.details
+            )
+        ).dict()
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=APIErrorResponse(
+            error=APIErrorContent(
+                code="http_error",
+                message=exc.detail,
+                details=None
+            )
+        ).dict()
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content=APIErrorResponse(
+            error=APIErrorContent(
+                code="validation_error",
+                message="Validation error",
+                details=exc.errors()
+            )
+        ).dict()
+    )
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content=APIErrorResponse(
+            error=APIErrorContent(
+                code="internal_error",
+                message="Internal server error",
+                details=None
+            )
+        ).dict()
+    )
 
 if __name__ == "__main__":
     import uvicorn

@@ -93,8 +93,6 @@ async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
         issued_at=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         expiration_time=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(expiration_time)),
     )
-    
-    
     logger.info(f"Generated login payload: {payload}")
     return payload
 
