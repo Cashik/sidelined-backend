@@ -398,8 +398,10 @@ async def call_tool(
         else:
             # получаем следующий nonce
             chat = await crud.get_user_chat(db, request.chat_id, user.id)
+            logger.info(f"Chat: {chat}")
             if chat.messages:
-                next_nonce = max(msg.nonce for msg in chat.messages) + 1
+                max_nonce = max(chat.messages.keys())
+                next_nonce = max_nonce + 1
             else:
                 next_nonce = 0
         
