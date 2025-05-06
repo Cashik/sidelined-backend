@@ -397,7 +397,11 @@ async def call_tool(
             next_nonce = 0
         else:
             # получаем следующий nonce
-            next_nonce = await crud.get_next_nonce(db, request.chat_id, user.id)
+            chat = await crud.get_user_chat(db, request.chat_id, user.id)
+            if chat.messages:
+                next_nonce = max(msg.nonce for msg in chat.messages) + 1
+            else:
+                next_nonce = 0
         
         tool_message = schemas.ToolCallMessage(
             content=schemas.ToolCallContent(
