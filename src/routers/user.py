@@ -23,6 +23,7 @@ class ChatSettingsUpdateRequest(schemas.UserChatSettings):
     pass
 
 class AvailableSettingsResponse(BaseModel):
+    default_chat_model: enums.Model
     chat_models: List[enums.Model]
     chat_styles: List[enums.ChatStyle]
     chat_details_levels: List[enums.ChatDetailsLevel]
@@ -71,6 +72,7 @@ async def get_user(user: models.User = Depends(get_current_user)):
 @router.get("/settings/chat", response_model=AvailableSettingsResponse)
 async def get_available_settings():
     return AvailableSettingsResponse(
+        default_chat_model=settings.DEFAULT_AI_MODEL,
         chat_models=list(enums.Model),
         chat_styles=list(enums.ChatStyle),
         chat_details_levels=list(enums.ChatDetailsLevel)
