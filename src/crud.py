@@ -206,6 +206,19 @@ async def add_chat_messages(db: Session, chat_id: int, messages: List[schemas.Me
     return await get_user_chat(db, chat_id, user_id)
     
 
+async def delete_chat_messages(db: Session, chat_id: int, from_nonce: int) -> schemas.Chat:
+    """
+    Удаление сообщений в чате после определенного nonce
+    """
+    stmt = delete(models.Message).where(
+        models.Message.chat_id == chat_id,
+        models.Message.nonce >= from_nonce,
+    )
+    db.execute(stmt)
+    db.commit()
+
+
+
 async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     """
     Удаление чата пользователя (скрытие через флаг visible)

@@ -125,11 +125,12 @@ async def get_chat(id: int, user: models.User = Depends(get_current_user), db: S
 
 
 async def stream_and_collect_messages(
+    db: Session,
     event_generator: AsyncGenerator[str, None],
     user_message: schemas.ChatMessage,
     chat_id: int,
     user_id: int,
-    db: Session
+    delete_old_messages: bool = False,
 ):
     """
     ретранслирует события от генератора и собирает сообщения в список, чтобы сохранить их в базу
@@ -142,7 +143,6 @@ async def stream_and_collect_messages(
             try:
                 data = json.loads(sse_event[5:])
                 event_type = data.get("type")
-                logger.info(f"Событие: {event_type} {data}")
                 # Собираем tool-calls
                 if event_type == "tool_call":
                     pass
@@ -218,6 +218,9 @@ async def stream_and_collect_messages(
     
     logger.info(f"Сохраняем сообщения в базу: {new_messages}")
     try:
+        # удаляем все сообщения после next_nonce, потому что если они есть, значит пользователь откатывается назад
+        if delete_old_messages:
+            await crud.delete_chat_messages(db, chat_id, user_message.nonce+1)
         await crud.add_chat_messages(db, chat_id, new_messages, user_id)
     except Exception as e:
         logger.error(f"Ошибка сохранения сообщений: {e}", exc_info=True)
@@ -275,13 +278,16 @@ async def create_message_stream(
         # если чат существует, то получаем все сообщения до данного юзером nonce
         # если nonce указан, то получаем все сообщения до данного nonce
         try:
-            if create_message_request.nonce:
+            if create_message_request.nonce is not None:
                 chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id, to_nonce=create_message_request.nonce-1)
             else:
                 chat: schemas.Chat = await crud.get_user_chat(db, create_message_request.chat_id, user.id)
         except Exception as e:
             logger.error(f"Ошибка получения чата: {e}", exc_info=True)
             raise exceptions.APIError(code="chat_retrieval_failed", message="Failed to retrieve chat history", status_code=500)
+
+    logger.info(f"Чат: {chat}")
+    logger.info(f"Сообщения в чате: {chat.messages}")
 
     # собираем все данные для генерации ответа
     assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat, db)
@@ -290,14 +296,16 @@ async def create_message_stream(
     # генерируем ответ от ИИ
     event_generator = utils.generate_ai_response_asstream(prompt_service)
     
+    need_to_delete_old_messages = create_message_request.nonce is not None
     # Оборачиваем стриминг
     async def wrapped_stream():
         async for event in stream_and_collect_messages(
+            db,
             event_generator,
             user_message,
             chat_id=create_message_request.chat_id,
             user_id=user.id,
-            db=db,
+            delete_old_messages=need_to_delete_old_messages,
         ):
             yield event
     
