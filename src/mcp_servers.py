@@ -10,15 +10,6 @@ from src.services.mcp_client_service import MCPClient
 logger = logging.getLogger(__name__)
 
 mcp_servers = []
-if settings.THIRDWEB_MCP_SSE_URL:
-    mcp_servers.append(
-        schemas.MCPSSEServer(
-            name="Thirdweb",
-            description="Thirdweb tools provide access to the thirdweb platform. It's can be used to access onchain data, ask nebula etc.",
-            url=settings.THIRDWEB_MCP_SSE_URL
-        )
-    )
-
 if settings.EXA_SEARCH_API_KEY and settings.SMITHERY_API_KEY and False:
     exa_search_url = smithery.create_smithery_url("wss://server.smithery.ai/exa/ws", {
         "exaApiKey": settings.EXA_SEARCH_API_KEY
@@ -28,7 +19,13 @@ if settings.EXA_SEARCH_API_KEY and settings.SMITHERY_API_KEY and False:
         description="Fast, intelligent web search and crawling.",
         url=exa_search_url
     ))
-    
+
+if settings.EVM_AGENT_KIT_SSE_URL:
+    mcp_servers.append(schemas.MCPSSEServer(
+        name="EVM Agent Kit",
+        description="A lot of blockchain tools",
+        url=settings.EVM_AGENT_KIT_SSE_URL
+    ))
 
 toolboxes: List[schemas.Toolbox] = []
 
