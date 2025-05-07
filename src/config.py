@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
     
+    # MCP settings
+    MCP_CONNECTION_TIMEOUT: int = 10  # Таймаут подключения к MCP серверам в секундах
+    
     # JWT settings
     JWT_SECRET_KEY: str = "your-secret-key"  # Default use main SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
@@ -96,6 +99,7 @@ class Settings(BaseSettings):
     SMITHERY_API_KEY: str | None = None
     EXA_SEARCH_API_KEY: str | None = None
     
+    ANKR_API_KEY: str
     
     @validator('TOKEN_REQUIREMENTS')
     def validate_token_requirements(cls, v):

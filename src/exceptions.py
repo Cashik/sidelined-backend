@@ -27,6 +27,10 @@ class ThirdwebServiceError(BusinessError):
     def __init__(self):
         super().__init__(code="thirdweb_service_error", message="Error while getting balances")
 
+class Web3ServiceError(BusinessError):
+    def __init__(self):
+        super().__init__(code="web3_service_error", message="Error while getting balances")
+
 class FactNotFoundError(BusinessError):
     def __init__(self):
         super().__init__(code="fact_not_found", message="Fact not found")
