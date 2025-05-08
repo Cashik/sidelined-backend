@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
     # MCP Servers and tools API keys
-    EVM_AGENT_KIT_SSE_URL: str = "http://evm_mcp:8081/sse"
+    EVM_AGENT_KIT_SSE_URL: str | None = None
     SMITHERY_API_KEY: str | None = None
     EXA_SEARCH_API_KEY: str | None = None
     
