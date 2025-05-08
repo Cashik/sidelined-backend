@@ -366,31 +366,51 @@ async def call_tool(
     
     # Валидируем входные параметры на основе схемы
     try:
-        validate_tool_input(tool.inputSchema, request.input)
+        validate_tool_input(tool.args_schema, request.input)
     except ValidationError as e:
         logger.error(f"Validation error for tool {request.tool_name}: {str(e)}")
         raise exceptions.APIError(code="invalid_input_parameters", message=f"Invalid input parameters: {str(e)}", status_code=400)
     
-    # Получаем сервер для выбранного тулбокса
-    from src.mcp_servers import mcp_servers
-    server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
-    if not server:
-        raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)
-    
     # Инициализируем клиент MCP
     from src.services.mcp_client_service import MCPClient
     logger.info(f"Initializing MCP client for {request.toolbox_name}")
-    mcp_client = MCPClient(server)
+
     
     # Вызываем тул
     try:
         logger.info(f"Calling tool {request.tool_name} with input {request.input}")
         start_time = time.time()
         
-        result: Dict[str, Any] = await mcp_client.invoke_tool(request.tool_name, request.input)
+        # если это дефолтный тулбокс, то вызываем его напрямую
+        if toolbox.type == enums.ToolboxType.DEFAULT:
+            if hasattr(tool, "ainvoke"):
+                # передаём ВСЮ dict одним позиционным аргументом
+                result = await tool.ainvoke(request.input)
+            else:
+                result = tool.invoke(request.input)
+            logger.info(f"Result1: {result}")
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except Exception:
+                    result = {"raw": result}
+                    
+            if not isinstance(result, dict):
+                result = {"raw": result}
+            logger.info(f"Result2: {result}")
+            
+        else:
+            # если это не дефолтный тулбокс, то вызываем его через MCP
+                # Получаем сервер для выбранного тулбокса
+            from src.mcp_servers import mcp_servers
+            server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
+            if not server:
+                raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)
+            mcp_client = MCPClient(server)
+            result: Dict[str, Any] = await mcp_client.invoke_tool(request.tool_name, request.input)
         
         execution_time_ms = int((time.time() - start_time) * 1000)
-        logger.info(f"Tool {request.tool_name} called successfully in {execution_time_ms} ms")
+        logger.info(f"Tool {request.tool_name} called successfully in {execution_time_ms} ms with result {result}")
     except Exception as e:
         logger.error(f"Error calling tool {request.tool_name}: {str(e)}", exc_info=True)
         raise exceptions.APIError(code="tool_call_failed", message=f"Error calling tool: {str(e)}", status_code=500)
@@ -413,6 +433,7 @@ async def call_tool(
             else:
                 next_nonce = 0
         
+
         tool_message = schemas.ToolCallMessage(
             content=schemas.ToolCallContent(
                 name=request.tool_name,

@@ -233,6 +233,7 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     from langchain.agents import create_tool_calling_agent, AgentExecutor
     from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
     from src.mcp_servers import mcp_servers as mcp_servers_list
+    from src.mcp_servers import prebuild_toolboxes
 
     mcp_servers = {}
     for server in mcp_servers_list:
@@ -284,6 +285,10 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     async with mcp_multi_client as mcp_session:
         logger.info(f"Generating response with MCP tools ...")
         tools = mcp_session.get_tools()
+        
+        # расширяем инструменты дефолтным тулбоксом
+        for toolbox in prebuild_toolboxes:
+            tools.extend(toolbox.tools)
 
         agent = create_tool_calling_agent(
             llm=llm,

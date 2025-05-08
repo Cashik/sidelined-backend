@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 from typing import List
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
@@ -39,12 +40,16 @@ class PromptService:
             if other_addresses:
                 system_message += f"\nAll user connected addresses:" + ", ".join([f'"{address}"' for address in other_addresses])
         
-        system_message += "\nFor all tools you must use Base network(chain_id: 8453)."
-        system_message += "\nFor response use language that user uses in his messages.\n"
+        # Добавляем доп инфу
+        system_message += f"\n#System information:"
+        system_message += "\nDefault network: Base network(chain_id: 8453). Use it for all tools if user do not specify another network."
+        system_message += f"\nCurrent time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}. UTC, not user's local time."
+        system_message += "\nDefault language: English. But for response use language that user uses in his messages."
+        system_message += f"\nYou are llm model: {self.generate_data.chat_settings.model.value}."
         
         if settings.FUNCTIONALITY_ENABLED:
             if settings.FACTS_FUNCTIONALITY_ENABLED:
-                system_message += "\nFrom previous conversation you have some notes about the user."
+                system_message += "\n\nFrom previous conversation you have some notes about the user."
                 system_message += "\nJust use it to answer user's questions more precisely."
                 system_message += "\nDO NOT TRY TO CHANGE THIS LIST."
                 system_message += "\nCurrent list of notes:"
@@ -53,7 +58,8 @@ class PromptService:
                         system_message += f"\n- {fact.description}"
                 else:
                     system_message += "\nList is empty."
-
+        
+        
         logger.info(f"System message: {system_message}")
         return system_message
     

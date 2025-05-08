@@ -53,4 +53,7 @@ class MessageType(Enum):
     LOCATION = "location"
     TRANSACTION = "transaction"
     
+class ToolboxType(Enum):
+    DEFAULT = "default"
+    MCP = "mcp"
 

@@ -11,7 +11,7 @@ from src import schemas
 logger = logging.getLogger(__name__)
 
 class MCPClient:
-    def __init__(self, server: schemas.MCPServer):
+    def __init__(self, server: schemas.MCPServerConfig):
         self.server = server
 
     @asynccontextmanager

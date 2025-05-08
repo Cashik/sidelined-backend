@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
 from decimal import Decimal
 from pydantic import BaseModel, Field, ConfigDict, TypeAdapter, field_validator
 from datetime import datetime
@@ -236,26 +236,33 @@ class GeneratedResponse(BaseModel):
     text: str
     function_calls: Optional[List[FunctionCall]] = None
 
+from langchain_core.tools import BaseTool, StructuredTool
 
-from mcp.types import Tool, ListToolsResult
+class Tool(BaseTool):
+    pass
 
-class MCPServer(BaseModel):
+class SearchInput(BaseModel):
+    query: str = Field(description="Search query")
+
+
+class MCPServerConfig(BaseModel):
     name: str
     description: str
     transport: str
     
-class MCPSSEServer(MCPServer):
+class MCPSSEServer(MCPServerConfig):
     url: str
     transport: str = "sse"
     
-class MCPWebSocketServer(MCPServer):
+class MCPWebSocketServer(MCPServerConfig):
     url: str
     transport: str = "websocket"
 
 class Toolbox(BaseModel):
     name: str
     description: str
-    tools: List[Tool]
+    tools: List[BaseTool]
+    type: enums.ToolboxType
 
 class APIErrorContent(BaseModel):
     code: str
