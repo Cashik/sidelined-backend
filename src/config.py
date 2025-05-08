@@ -62,9 +62,6 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
     
-    # MCP settings
-    MCP_CONNECTION_TIMEOUT: int = 10  # Таймаут подключения к MCP серверам в секундах
-    
     # JWT settings
     JWT_SECRET_KEY: str = "your-secret-key"  # Default use main SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
@@ -72,7 +69,6 @@ class Settings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # For future implementation refresh tokens
     
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
-    MAX_DAILY_QUESTIONS: int = 3
 
     # AI providers keys and settings
     OPENAI_API_KEY: str | None = None
@@ -80,12 +76,8 @@ class Settings(BaseSettings):
     
     # Chat settings
     DEFAULT_CREDITS: int = 100  # или любое другое дефолтное значение
-    DEFAULT_CHAT_CONTEXT_LIMIT_NONCE: int = 15 # не в сообщениях, а в nonce
     DEFAULT_AI_MODEL: enums.Model = enums.Model.GPT_4O
     
-    # Thirdweb settings
-    THIRDWEB_APP_ID: str
-    THIRDWEB_PRIVATE_KEY: str
     ALLOW_CHAT_WHEN_SERVER_IS_DOWN: bool = False
     
     FACTS_FUNCTIONALITY_ENABLED: bool = True
