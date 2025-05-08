@@ -14,7 +14,6 @@ from src.providers.gemini import GeminiProvider, GeminiNotesResponse
 logger = logging.getLogger(__name__)
 
 
-
 async def update_user_information(user_id: int):
     """
     Анализирует все новые сообщения пользователя из всех чатов, делает запрос к Gemini
@@ -54,7 +53,7 @@ async def update_user_information(user_id: int):
         messages_to_analyze = []
         
         # Получаем из базы все сообщения пользователя, которые не были проанализированы
-        messages_to_analyze = await crud.get_user_messages_to_analyze(user_id, session)
+        messages_to_analyze = await crud.get_user_messages_to_analyze(user, session)
         
         # TODO: продумать значение минимального количества сообщений для анализа или придумать что-то другое для фильтра проверки
         if not messages_to_analyze or len(messages_to_analyze) < 1:

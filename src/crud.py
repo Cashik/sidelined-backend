@@ -445,18 +445,18 @@ async def delete_user(user: models.User, session: Session) -> None:
 async def get_user_messages_to_analyze(user: models.User, session: Session) -> List[models.Message]:
     """
     Получение сообщений пользователя, которые не были проанализированы.
-    Сложный запрос включает в себя получение всех сообщений во всех видимых чатах пользователя, nonce которых больше чем last_analysed_nonce этого чата.
+    Для каждого чата пользователя возвращает только те сообщения, у которых nonce > last_analysed_nonce.
     """
-    stmt = select(models.Message).where(
-        models.Message.chat_id.in_(
-            select(models.Chat.id).where(
-                models.Chat.user_id == user.id,
-                models.Chat.visible == True
-            )
-        ),
-        models.Message.nonce > models.Chat.last_analysed_nonce,
-        models.Message.sender == enums.Role.USER,
-        models.Message.type == enums.MessageType.TEXT
+    stmt = (
+        select(models.Message)
+        .join(models.Chat, models.Message.chat_id == models.Chat.id)
+        .where(
+            models.Chat.user_id == user.id,
+            models.Chat.visible == True,
+            models.Message.nonce > models.Chat.last_analysed_nonce,
+            models.Message.sender == enums.Role.USER,
+            models.Message.type == enums.MessageType.TEXT
+        )
     )
     return session.execute(stmt).scalars().all()
 
