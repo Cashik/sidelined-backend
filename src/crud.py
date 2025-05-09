@@ -362,7 +362,7 @@ async def add_user_address(
     existing_address = session.execute(stmt).scalar_one_or_none()
     
     if existing_address:
-        raise exceptions.AddressAlreadyExistsException()
+        raise exceptions.AddressAlreadyExistsError()
     
     # Создаем новый адрес
     wallet = models.WalletAddress(
