@@ -25,6 +25,7 @@ class User(Base):
     
     credits = Column(Integer, nullable=False, default=settings.DEFAULT_CREDITS) #!Warning: менять значение только с помощью методов из crud.py
     credits_last_update = Column(Integer, nullable=False, default=utils_base.now_timestamp)
+    pro_plan_promo_activated = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships
     chats = relationship("Chat", back_populates="user")
@@ -33,6 +34,13 @@ class User(Base):
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
     )
+    
+    @property
+    def subscription_plan(self) -> enums.SubscriptionPlanType:
+        if self.pro_plan_promo_activated:
+            return enums.SubscriptionPlanType.PRO
+        else:
+            return enums.SubscriptionPlanType.BASIC
 
 class WalletAddress(Base):
     __tablename__ = "wallet_address"

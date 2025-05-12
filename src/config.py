@@ -4,42 +4,126 @@ import os
 from pydantic import ConfigDict, validator
 from src import enums, schemas
 
-requirements = [
+
+project_tokens = {
+    "RIZ": schemas.Token(
+        chain_id=enums.ChainID.BASE,
+        address="0x67543CF0304C19CA62AC95ba82FD4F4B40788dc1",
+        interface=enums.TokenInterface.ERC20,
+        decimals=8,
+        symbol="RIZ",
+        name="Rivals Network"
+    ),
+    "wRIZ": schemas.Token(
+        chain_id=enums.ChainID.BASE,
+        address="0xA70acF9Cbb8CA5F6c2A9273283fb17C195ab7a43",
+        interface=enums.TokenInterface.ERC20,
+        decimals=8,
+        symbol="wRIZ",
+        name="Staked RIZ"
+    ),
+    "ZNL": schemas.Token(
+        chain_id=enums.ChainID.ARBITRUM,
+        address="0x78bDE7b6C7eB8f5F1641658c698fD3BC49738367",
+        interface=enums.TokenInterface.ERC721,
+        decimals=0,
+        symbol="ZNL",
+        name="ZNodeLicense"
+    )
+}
+
+
+pro_plan_requirements = [
     schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.BASE,
-            address="0x67543CF0304C19CA62AC95ba82FD4F4B40788dc1",
-            interface=enums.TokenInterface.ERC20,
-            decimals=8,
-            symbol="RIZ",
-            name="Rivals Network"
-        ),
+        token=project_tokens["RIZ"],
         balance=1000
     ),
     schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.BASE,
-            address="0xA70acF9Cbb8CA5F6c2A9273283fb17C195ab7a43",
-            interface=enums.TokenInterface.ERC20,
-            decimals=8,
-            symbol="wRIZ",
-            name="Staked RIZ"
-        ),
+        token=project_tokens["wRIZ"],
         balance=1000
     ),
+
+]
+
+ultra_plan_requirements = [
     schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.ARBITRUM,
-            address="0x78bDE7b6C7eB8f5F1641658c698fD3BC49738367",
-            interface=enums.TokenInterface.ERC721,
-            decimals=0,
-            symbol="ZNL",
-            name="ZNodeLicense"
-        ),
+        token=project_tokens["RIZ"],
+        balance=8000
+    ),
+    schemas.TokenRequirement(
+        token=project_tokens["wRIZ"],
+        balance=8000
+    ),
+    schemas.TokenRequirement(
+        token=project_tokens["ZNL"],
         balance=1
     )
 ]
 
+available_models = [
+    schemas.AIModel(
+        id=enums.Model.GPT_4O,
+        provider=enums.Service.OPENAI,
+        name="GPT-4O",
+        description="Fast, intelligent, flexible GPT model"
+    ),
+    schemas.AIModel(
+        id=enums.Model.GPT_4_1,
+        provider=enums.Service.OPENAI,
+        name="GPT-4.1",
+        description="Flagship GPT model for complex tasks"
+    ),
+    schemas.AIModel(
+        id=enums.Model.GPT_O4_MINI,
+        provider=enums.Service.OPENAI,
+        name="o4-mini",
+        description="Fast reasoning model"
+    ),
+    schemas.AIModel(
+        id=enums.Model.GEMINI_2_5_PRO,
+        provider=enums.Service.GEMINI,
+        name="gemini-2.5-pro-preview-03-25",
+        description="Intelligent and flexible Gemini model"
+    ),
+    schemas.AIModel(
+        id=enums.Model.GEMINI_2_5_FLASH,
+        provider=enums.Service.GEMINI,
+        name="gemini-2.5-flash-preview-04-17",
+        description="Fast and flexible Gemini model"
+    )
+]
+
+
+all_ai_models_ids = list(enums.Model)
+basic_ai_models_ids = [enums.Model.GPT_4O, enums.Model.GPT_O4_MINI, enums.Model.GEMINI_2_5_FLASH]
+pro_ai_models_ids = [enums.Model.GPT_4_1, enums.Model.GEMINI_2_5_PRO]
+
+subscription_plans = [
+    schemas.SubscriptionPlanExtended(
+        id=enums.SubscriptionPlanType.BASIC,
+        name="Basic",
+        requirements=[],
+        max_credits=30,
+        available_models_ids=basic_ai_models_ids,
+        available_tools=[]
+    ),
+    schemas.SubscriptionPlanExtended(
+        id=enums.SubscriptionPlanType.PRO,
+        name="Pro",
+        requirements=pro_plan_requirements,
+        max_credits=100,
+        available_models_ids=pro_ai_models_ids+basic_ai_models_ids,
+        available_tools=[]
+    ),
+    schemas.SubscriptionPlanExtended(
+        id=enums.SubscriptionPlanType.ULTRA,
+        name="Ultra",
+        requirements=ultra_plan_requirements,
+        max_credits=10000,
+        available_models_ids=all_ai_models_ids,
+        available_tools=[]
+    )
+]
 
 class Settings(BaseSettings):
     # Server settings
@@ -83,7 +167,8 @@ class Settings(BaseSettings):
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Token requirements
-    TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = requirements
+    TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = pro_plan_requirements
+    SUBSCRIPTION_PLANS: list[schemas.SubscriptionPlan] = subscription_plans
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
     # MCP Servers and tools API keys
@@ -93,6 +178,7 @@ class Settings(BaseSettings):
     
     ANKR_API_KEY: str
     
+    # todo: валидировать планы подписки
     @validator('TOKEN_REQUIREMENTS')
     def validate_token_requirements(cls, v):
         for req in v:

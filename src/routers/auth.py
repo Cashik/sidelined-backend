@@ -5,12 +5,11 @@ import time
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from src import crud, schemas, utils, utils_base
+from src import crud, schemas, utils, utils_base, enums, models
 from src.core.crypto import verify_signature, validate_payload
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
-from src import models
 from src.config import settings
 
 router = APIRouter(prefix="/auth")
@@ -22,9 +21,6 @@ logger = logging.getLogger(__name__)
 LOGIN_STATEMENT = "Sign in to Sidelined AI using your wallet with required tokens on balance."
 DOMAIN = settings.DOMAIN
 
-def get_supported_chain_ids() -> set[int]:
-    """Получает список поддерживаемых chain_id из настроек токенов"""
-    return {req.token.chain_id.value for req in settings.TOKEN_REQUIREMENTS}
 
 @router.post("/login", response_model=schemas.LoginResponse)
 async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
@@ -44,14 +40,14 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
         session=db
     )
     
-    # Проверяем баланс
-    balance_check_success = await utils.check_user_access(user)
+    # Проверяем подписку
+    subscription_check: enums.SubscriptionPlanType = await utils.check_user_access(user)
     
     # Создаем токен
     token_payload = schemas.TokenPayload(
         user_id=user.id,
         balance_check_time=utils_base.now_timestamp(),
-        balance_check_success=balance_check_success
+        subscription=subscription_check
     )
     token = create_token(token_payload)
     
@@ -63,7 +59,7 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     return schemas.LoginResponse(
         access_token=token,
         token_type="bearer",
-        chat_available=balance_check_success
+        subscription=subscription_check
     )
 
 @router.post("/logout")
