@@ -59,7 +59,7 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     return schemas.LoginResponse(
         access_token=token,
         token_type="bearer",
-        subscription=subscription_check
+        subscription_id=subscription_check
     )
 
 @router.post("/logout")

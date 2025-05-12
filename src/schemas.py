@@ -37,7 +37,7 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    subscription: enums.SubscriptionPlanType
+    subscription_id: enums.SubscriptionPlanType
     # TODO: убрать chat_available - устарело
     chat_available: bool = True
     
