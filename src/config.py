@@ -37,7 +37,7 @@ requirements = [
             name="ZNodeLicense"
         ),
         balance=1
-    )
+    ),
     schemas.TokenRequirement(
         token=schemas.Token(
             chain_id=enums.ChainID.ETHEREUM,
