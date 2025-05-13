@@ -27,7 +27,7 @@ from src.schemas import APIErrorContent, APIErrorResponse
 from src.exceptions import APIError
 
 app = FastAPI(
-    title="2Eden API - Swagger UI",
+    title="Sidelined API - Swagger UI",
     default_response_class=JSONResponse,
     prefix="/api"
 )
@@ -59,14 +59,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-New-Token"],
 )
-
-def get_db():
-    db = next(get_session())
-    try:
-        yield db
-    finally:
-        db.close()
-
 
 # Подключаем роутеры
 app.include_router(auth.router)
