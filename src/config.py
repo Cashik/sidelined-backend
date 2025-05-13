@@ -38,6 +38,17 @@ requirements = [
         ),
         balance=1
     )
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.ETHEREUM,
+            address="0xc555D625828c4527d477e595fF1Dd5801B4a600e",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="MON",
+            name="Monprotocol"
+        ),
+        balance=200
+    )
 ]
 
 

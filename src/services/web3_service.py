@@ -30,6 +30,7 @@ class Web3Service():
     NETWORK_TO_URL = {
         enums.ChainID.BASE: "base",
         enums.ChainID.ARBITRUM: "arbitrum",
+        enums.ChainID.ETHEREUM: "eth",
     }
     
     def __init__(self, api_key: str):
