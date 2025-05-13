@@ -55,6 +55,10 @@ class MessageType(Enum):
 class ToolboxType(Enum):
     DEFAULT = "default"
     MCP = "mcp"
+    
+class ToolboxList(Enum):
+    BASIC = "basic"
+    EVM_KIT = "evm_kit"
 
 class SubscriptionPlanType(Enum):
     BASIC = "Basic"

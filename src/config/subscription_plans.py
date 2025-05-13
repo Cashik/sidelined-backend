@@ -70,6 +70,10 @@ all_ai_models_ids = list(enums.Model)
 basic_ai_models_ids = [enums.Model.GPT_4O, enums.Model.GPT_O4_MINI, enums.Model.GEMINI_2_5_FLASH]
 pro_ai_models_ids = [enums.Model.GPT_4_1, enums.Model.GEMINI_2_5_PRO]
 
+
+all_toolboxes_ids = list(enums.ToolboxList)
+basic_toolboxes_ids = [enums.ToolboxList.BASIC]
+
 # todo: явно разделять требования на наши и партнеров
 # todo: на старте нужно проверять, можем ли мы проверять требования - все ли настройки валидные
 subscription_plans = [
@@ -79,7 +83,7 @@ subscription_plans = [
         requirements=[],
         max_credits=30,
         available_models_ids=basic_ai_models_ids,
-        available_tools=[]
+        available_toolboxes_ids=basic_toolboxes_ids
     ),
     schemas.SubscriptionPlanExtended(
         id=enums.SubscriptionPlanType.PRO,
@@ -87,7 +91,7 @@ subscription_plans = [
         requirements=pro_plan_requirements,
         max_credits=100,
         available_models_ids=pro_ai_models_ids+basic_ai_models_ids,
-        available_tools=[]
+        available_toolboxes_ids=all_toolboxes_ids
     ),
     schemas.SubscriptionPlanExtended(
         id=enums.SubscriptionPlanType.ULTRA,
@@ -95,6 +99,14 @@ subscription_plans = [
         requirements=ultra_plan_requirements,
         max_credits=10000,
         available_models_ids=all_ai_models_ids,
-        available_tools=[]
+        available_toolboxes_ids=all_toolboxes_ids
     )
 ]
+
+def get_subscription_plan(subscription_id: enums.SubscriptionPlanType) -> schemas.SubscriptionPlanExtended:
+    for plan in subscription_plans:
+        if plan.id == subscription_id:
+            return plan
+    raise ValueError(f"Subscription plan with id {subscription_id} not found")
+
+

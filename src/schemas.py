@@ -223,6 +223,7 @@ class AssistantGenerateData(BaseModel):
     user: UserProfileData
     chat: Chat
     chat_settings: GenerateMessageSettings
+    toolbox_ids: List[enums.ToolboxList] = []
 
     
 # Схемы для вызова функций
@@ -266,6 +267,7 @@ class MCPWebSocketServer(MCPServerConfig):
     transport: str = "websocket"
 
 class Toolbox(BaseModel):
+    id: enums.ToolboxList
     name: str
     description: str
     tools: List[BaseTool]
@@ -287,10 +289,9 @@ class AIModel(BaseModel):
     description: str
     input_types: list[enums.MessageType] = [enums.MessageType.TEXT, enums.MessageType.TOOL_CALL]
     output_types: list[enums.MessageType] = [enums.MessageType.TEXT, enums.MessageType.TOOL_CALL]
-    
-    
+
 # Схемы для подписок
-    
+
 class SubscriptionPlan(BaseModel):
     id: enums.SubscriptionPlanType
     name: str
@@ -300,5 +301,13 @@ class SubscriptionPlan(BaseModel):
 # дополненная схема подписки с доп информацие о функциях и моделях
 class SubscriptionPlanExtended(SubscriptionPlan):
     available_models_ids: List[enums.Model]
-    available_tools: List[Toolbox]
+    available_toolboxes_ids: List[enums.ToolboxList]
+
+# cхемы с прописанными ограничениями на план
+
+class AiModelRestricted(AIModel):
+    from_plan_id: enums.SubscriptionPlanType
+
+class ToolboxRestricted(Toolbox):
+    from_plan_id: enums.SubscriptionPlanType
 

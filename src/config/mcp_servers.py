@@ -1,4 +1,5 @@
 from typing import List
+import json
 import smithery
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -13,13 +14,26 @@ from src.services.mcp_client_service import MCPClient
 
 logger = logging.getLogger(__name__)
 
-mcp_servers = []
+"""
+Файл, в котором происходит синхронизация инструментов для тулбоксов.
+
+MCP инструменты проходят через  mcp->langchain_mcp_adapters->langchain_core.tools
+и по итогу схема тулза описана как json schema.
+
+По этому, встроенные тулбоксы так же следует описывать в формате json schema.
+"""
+
+
+# словарь со списком удаленных mcp серверов
+# id: схема тулбокса
+mcp_servers = dict()
+
 if settings.EVM_AGENT_KIT_SSE_URL:
-    mcp_servers.append(schemas.MCPSSEServer(
+    mcp_servers[enums.ToolboxList.EVM_KIT] = schemas.MCPSSEServer(
         name="EVM Agent Kit",
         description="Some blockchain tools",
         url=settings.EVM_AGENT_KIT_SSE_URL
-    ))
+    )
 
 prebuild_toolboxes = []
 if True:
@@ -47,6 +61,7 @@ if True:
     )
 
     prebuilt_toolbox = schemas.Toolbox(
+        id=enums.ToolboxList.BASIC,
         name="Basic tools",
         description="Tools for basic tasks.",
         tools=[search_tool],
@@ -58,11 +73,12 @@ toolboxes: List[schemas.Toolbox] = []
 
 async def sync_toolboxes():
     # Добавляем тулбоксы от mcp серверов
-    for server in mcp_servers:
+    for id, server in mcp_servers.items():
         mcp_client = MCPClient(server)
         async with mcp_client.get_session() as session:
             tools = await load_mcp_tools(session)
         toolbox = schemas.Toolbox(
+            id=id,
             name=server.name,
             description=server.description,
             tools=tools,

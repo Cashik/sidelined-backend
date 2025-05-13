@@ -13,12 +13,11 @@ import time
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
-from src.config.settings import settings
 from src.services import user_context_service
+from src.config.settings import settings
 from src.config.mcp_servers import get_toolboxes, mcp_servers
 from src.services.prompt_service import PromptService
-
-
+from src.config import ai_models, subscription_plans
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -36,8 +35,10 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     chat: schemas.Chat
 
-class ProvidersResponse(BaseModel):
-    models: List[enums.Model]
+
+
+class AllAiModelsesponse(BaseModel):
+    models: List[schemas.AiModelRestricted]
 
 class UserMessageCreateRequest(BaseModel):
     chat_id: Optional[int] = None
@@ -67,7 +68,7 @@ class DeleteResponse(BaseModel):
     success: bool = True
 
 
-async def user_to_assistant_generate_data(user: models.User, create_message_request: UserMessageCreateRequest, chat: schemas.Chat, db: Session) -> Tuple[schemas.AssistantGenerateData, schemas.ChatMessage]:
+async def user_to_assistant_generate_data(user: models.User, create_message_request: UserMessageCreateRequest, chat: schemas.Chat) -> Tuple[schemas.AssistantGenerateData, schemas.ChatMessage]:
     model = create_message_request.model or settings.DEFAULT_AI_MODEL
     next_nonce = create_message_request.nonce if create_message_request.nonce else (max(chat.messages.keys()) if chat.messages else 0)
     user_new_message = schemas.ChatMessage(
@@ -109,11 +110,34 @@ async def user_to_assistant_generate_data(user: models.User, create_message_requ
     assistant_generate_data.chat.messages.update({next_nonce: [user_new_message]})
     return assistant_generate_data, user_new_message
 
-@router.get("/providers", response_model=ProvidersResponse)
+@router.get("/models/all", response_model=AllAiModelsesponse)
+async def get_all_ai_models():
+    # TODO: добавить выключение моделей и сервисов
+    # TODO: добавить кеширование данного ответа
+    response: List[schemas.AiModelRestricted] = []
+    for model in ai_models.ai_models:
+        # ищем модель в планах
+        from_plan_id = None
+        for plan in subscription_plans.subscription_plans:
+            if model.id in plan.available_models_ids:
+                from_plan_id = plan.id
+                break
+        
+        # если модель не найдена в планах, то она недоступна
+        if from_plan_id is not None:
+            response.append(schemas.AiModelRestricted(
+                **model.model_dump(),
+                from_plan_id=from_plan_id,
+            ))
+    return AllAiModelsesponse(models=response)
+
+# Устаревший роутер, который возвращает все модели, которые можно использовать
+@router.get("/providers", response_model=AllAiModelsesponse)
 async def get_providers():
     # TODO: добавить выключение моделей и сервисов
     # TODO: добавить кеширование данного ответа
-    return ProvidersResponse(models=list(enums.Model))
+    return AllAiModelsesponse(models=list(enums.Model))
+
 
 @router.get("/all", response_model=ChatsResponse)
 async def get_chats(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
@@ -244,10 +268,21 @@ async def create_message_stream(
     create_message_request: UserMessageCreateRequest,
     background_tasks: BackgroundTasks,
     user: models.User = Depends(get_current_user),
+    user_subscription_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session)
 ):
+    # получаем подписку пользователя
+    user_subscription: schemas.SubscriptionPlanExtended = subscription_plans.get_subscription_plan(user_subscription_id)
+    # получаем доступные модели для пользователя
+    available_models = [model for model in user_subscription.available_models_ids]
+    # если модель не указана, то разрешаем использовать дефолтную модель
+    if create_message_request.model:
+        # проверяем, что модель доступна для пользователя
+        if create_message_request.model not in available_models:
+            raise exceptions.APIError(code="model_not_available", message="Model not available", status_code=403)
     
     # Пытаемся списать кредиты
+    # TODO: списывать кредиты после успешного ответа
     try:
         # Обновляем баланс кредитов перед началом генерации
         await crud.refresh_user_credits(db, user)
@@ -289,7 +324,9 @@ async def create_message_stream(
     logger.info(f"Сообщения в чате: {chat.messages}")
 
     # собираем все данные для генерации ответа
-    assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat, db)
+    assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat)
+    # получаем доступные ид тулбоксов для пользователя
+    assistant_generate_data.toolbox_ids = [toolbox_id for toolbox_id in user_subscription.available_toolboxes_ids]
     prompt_service = PromptService(assistant_generate_data)
     
     # генерируем ответ от ИИ
@@ -317,20 +354,31 @@ async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(ge
 
 
 class ToolsResponse(BaseModel):
-    toolboxes: List[schemas.Toolbox]
+    toolboxes: List[schemas.ToolboxRestricted]
     
-@router.get("/providers", response_model=ProvidersResponse)
-async def get_providers():
-    # TODO: добавить выключение моделей и сервисов
-    # TODO: добавить кеширование данного ответа
-    return ProvidersResponse(models=list(enums.Model))
-
 @router.get("/tools/standart/all", response_model=ToolsResponse)
 async def get_tools():
     # Сейчас каждый инстанс сервера будет иметь свой набор и получать его отдельно
     # ПРостое кеширование не избавит от лишних запросов при старте инстанса
-    result = await get_toolboxes()
-    return ToolsResponse(toolboxes=result)
+    response: List[schemas.ToolboxRestricted] = []
+    toolboxes = await get_toolboxes()
+    for toolbox in toolboxes:
+        from_plan_id = None
+        for plan in subscription_plans.subscription_plans:
+            if toolbox.id in plan.available_toolboxes_ids:
+                from_plan_id = plan.id
+                break
+        if from_plan_id is not None:
+            response.append(schemas.ToolboxRestricted(
+                id=toolbox.id,
+                name=toolbox.name,
+                description=toolbox.description,
+                tools=toolbox.tools,
+                type=toolbox.type,
+                from_plan_id=from_plan_id,
+            ))
+    
+    return ToolsResponse(toolboxes=response)
 
 class CallToolRequest(BaseModel):
     chat_id: Optional[int] = None

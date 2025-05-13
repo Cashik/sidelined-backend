@@ -1,3 +1,5 @@
+import json
+
 """
 Базовые утилиты для всего проекта.
 
@@ -8,3 +10,6 @@ import time
 def now_timestamp():
     """Получение текущего timestamp в секундах"""
     return int(time.time())
+
+
+

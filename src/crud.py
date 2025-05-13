@@ -98,11 +98,11 @@ async def get_user_chat(
     
     # Проверяем, существует ли чат
     if not chat:
-        raise exceptions.ChatNotFoundException()
+        raise exceptions.ChatNotFoundError()
     
     # Проверяем, принадлежит ли чат пользователю
     if chat.user_id != user_id:
-        raise exceptions.UserNotChatOwnerException()
+        raise exceptions.UserNotChatOwnerError()
     
     # Формируем запрос для получения сообщений с учетом nonce
     messages_stmt = select(models.Message).where(
@@ -231,11 +231,11 @@ async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     
     # Проверяем, существует ли чат
     if not chat:
-        raise exceptions.ChatNotFoundException()
+        raise exceptions.ChatNotFoundError()
     
     # Проверяем, принадлежит ли чат пользователю
     if chat.user_id != user_id:
-        raise exceptions.UserNotChatOwnerException()
+        raise exceptions.UserNotChatOwnerError()
     
     # Скрываем чат (устанавливаем visible=False)
     chat.visible = False
@@ -261,7 +261,7 @@ async def update_user_chat_settings(
     """
     user = await get_user_by_id(user_id, session)
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Обновляем все поля, включая None
     user.chat_settings = settings.model_dump(mode="json")
@@ -281,7 +281,7 @@ async def update_user_profile(
     Обновление профиля пользователя
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Обновляем все поля, включая None
     user.preferred_name = profile.preferred_name
@@ -301,7 +301,7 @@ async def add_user_facts(
     Добавление новых фактов о пользователе разом
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Создаем новые факты
     new_facts = [models.UserFact(
@@ -324,7 +324,7 @@ async def delete_user_facts(
     Удаление фактов о пользователе
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
 
     deleted_facts = []
     # Удаляем факты
@@ -337,7 +337,7 @@ async def delete_user_facts(
         fact = session.execute(fact_stmt).scalar_one_or_none()
         
         if not fact:
-            raise exceptions.FactNotFoundException(f"Fact with id {fact_id} not found")
+            raise exceptions.FactNotFoundError(f"Fact with id {fact_id} not found")
         
         # Удаляем факт
         session.delete(fact)
@@ -422,7 +422,7 @@ async def delete_user(user: models.User, session: Session) -> None:
     - Адреса кошельков
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Удаляем все чаты пользователя (это автоматически удалит все сообщения)
     for chat in user.chats:

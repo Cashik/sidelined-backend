@@ -15,6 +15,10 @@ class ChatNotFoundError(BusinessError):
     def __init__(self):
         super().__init__(code="chat_not_found", message="Chat not found")
 
+class UserNotFoundError(BusinessError):
+    def __init__(self):
+        super().__init__(code="user_not_found", message="User not found")
+
 class UserNotChatOwnerError(BusinessError):
     def __init__(self):
         super().__init__(code="not_chat_owner", message="You don't have access to this chat")
