@@ -8,7 +8,7 @@ from src import schemas, enums, models, crud, utils, exceptions
 from src.core.crypto import verify_signature, validate_payload
 from src.core.middleware import get_current_user
 from src.database import get_session
-from src.config import settings
+from src.config.settings import settings
 from src.exceptions import (
     AddressAlreadyExistsError, AddressNotFoundError, LastAddressError, FactNotFoundError, APIError
 )

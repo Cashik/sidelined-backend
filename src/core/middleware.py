@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from src.config import settings
+from src.config.settings import settings
 from src.core.auth import decode_token, create_token
 from src.database import get_session
 from src import models, crud, utils, schemas, utils_base, enums

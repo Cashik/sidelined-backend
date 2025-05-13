@@ -4,14 +4,14 @@ import logging
 from pydantic import BaseModel
 from typing import List, Optional, Any
 from src.providers.base import AIProvider
-from src.config import settings
+from langchain.chat_models import init_chat_model
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+
+from src.config.settings import settings
 from src.services.prompt_service import PromptService
 from src import enums, schemas
 
-from langchain.chat_models import init_chat_model
-
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_tool_calling_agent, AgentExecutor
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)

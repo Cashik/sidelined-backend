@@ -1,7 +1,7 @@
 import jwt
 from typing import Optional, Dict, Any
 
-from src.config import settings
+from src.config.settings import settings
 from src import utils_base, schemas, enums
 
 def create_token(payload: schemas.TokenPayload, expires_delta: Optional[int] = None) -> str:

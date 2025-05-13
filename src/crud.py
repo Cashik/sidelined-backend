@@ -2,11 +2,9 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
 from sqlalchemy import select, delete, or_, and_, func, desc, update
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-import time
 
 from src import models, schemas, enums, exceptions, utils_base
-from src.config import settings
+from src.config.settings import settings
 
 import logging
 

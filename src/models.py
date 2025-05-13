@@ -6,7 +6,7 @@ import time
 from sqlalchemy.dialects import postgresql
 
 from src import enums, schemas, utils_base
-from src.config import settings
+from src.config.settings import settings
 
 Base = declarative_base()
 

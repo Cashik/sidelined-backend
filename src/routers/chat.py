@@ -13,8 +13,10 @@ import time
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
-from src.config import settings
+from src.config.settings import settings
 from src.services import user_context_service
+from src.config.mcp_servers import get_toolboxes, mcp_servers
+from src.services.prompt_service import PromptService
 
 
 
@@ -244,9 +246,6 @@ async def create_message_stream(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_session)
 ):
-    from src.services.prompt_service import PromptService
-    from src.mcp_servers import mcp_servers as mcp_servers_list
-    from langchain_mcp_adapters.client import MultiServerMCPClient
     
     # Пытаемся списать кредиты
     try:
@@ -330,7 +329,6 @@ async def get_providers():
 async def get_tools():
     # Сейчас каждый инстанс сервера будет иметь свой набор и получать его отдельно
     # ПРостое кеширование не избавит от лишних запросов при старте инстанса
-    from src.mcp_servers import get_toolboxes
     result = await get_toolboxes()
     return ToolsResponse(toolboxes=result)
 
@@ -351,7 +349,6 @@ async def call_tool(
     db: Session = Depends(get_session)
 ):
     # Получаем доступные тулбоксы
-    from src.mcp_servers import get_toolboxes
     toolboxes = await get_toolboxes()
     
     # Валидируем наличие тулбокса
@@ -402,7 +399,6 @@ async def call_tool(
         else:
             # если это не дефолтный тулбокс, то вызываем его через MCP
                 # Получаем сервер для выбранного тулбокса
-            from src.mcp_servers import mcp_servers
             server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
             if not server:
                 raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)

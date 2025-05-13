@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from src.exceptions import BusinessError
 from pydantic import BaseModel
 
-from src.config import settings
+from src.config.settings import settings
 from src.database import get_session
 from src.models import *
 from src.routers import auth, chat, user, subscription
@@ -69,8 +69,8 @@ app.include_router(subscription.router)
 
 @app.on_event("startup")
 async def startup_event():
-    import src.mcp_servers
-    await src.mcp_servers.sync_toolboxes()
+    import src.config.mcp_servers
+    await src.config.mcp_servers.sync_toolboxes()
 
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):

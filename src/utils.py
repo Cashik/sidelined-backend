@@ -11,12 +11,11 @@ from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
 
 
 from src import schemas, enums, models, exceptions, crud
-from src.config import settings
-from src.services import thirdweb_service
+from src.config.settings import settings
+from src.config.subscription_plans import subscription_plans
 from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
-from src.providers import openai, gemini
-from src.mcp_servers import mcp_servers as mcp_servers_list
+from src.config.mcp_servers import mcp_servers as mcp_servers_list
 from src.utils_base import now_timestamp
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -232,8 +231,8 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain.agents import create_tool_calling_agent, AgentExecutor
     from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
-    from src.mcp_servers import mcp_servers as mcp_servers_list
-    from src.mcp_servers import prebuild_toolboxes
+    from src.config.mcp_servers import mcp_servers as mcp_servers_list
+    from src.config.mcp_servers import prebuild_toolboxes
 
     mcp_servers = {}
     for server in mcp_servers_list:
@@ -385,7 +384,7 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     
     web3_service = Web3Service(settings.ANKR_API_KEY)
     
-    for plan in reversed(settings.SUBSCRIPTION_PLANS):
+    for plan in reversed(subscription_plans):
         # проверяем все требования плана
         erc20_requirements = [req for req in plan.requirements if req.token.interface == enums.TokenInterface.ERC20]
         erc721_requirements = [req for req in plan.requirements if req.token.interface == enums.TokenInterface.ERC721]

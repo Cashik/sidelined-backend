@@ -10,7 +10,7 @@ from src.core.crypto import verify_signature, validate_payload
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
-from src.config import settings
+from src.config.settings import settings
 
 router = APIRouter(prefix="/auth")
 

@@ -4,7 +4,7 @@ from typing import List
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 
 from src import schemas, enums
-from src.config import settings
+from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 logger.setLevel(settings.LOG_LEVEL)

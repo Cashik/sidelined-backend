@@ -8,7 +8,7 @@ import asyncio
 from datetime import datetime
 
 from src import models, crud, schemas, enums, utils_base
-from src.config import settings
+from src.config.settings import settings
 from src.database import get_session
 from src.providers.gemini import GeminiProvider, GeminiNotesResponse
 logger = logging.getLogger(__name__)

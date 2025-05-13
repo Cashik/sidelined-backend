@@ -8,7 +8,7 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
     
 from src import schemas, enums
-from src.config import settings
+from src.config.settings import settings
 from src.services.mcp_client_service import MCPClient
 
 logger = logging.getLogger(__name__)

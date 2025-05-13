@@ -7,7 +7,8 @@ from sqlalchemy import select, func
 from src import schemas, enums, models, crud, utils
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
-from src.config import settings
+from src.config.settings import settings
+from src.config.subscription_plans import subscription_plans
 
 router = APIRouter(prefix="/subscription", tags=["Subscription"])
 
@@ -20,7 +21,7 @@ class SubscriptionPlansResponse(BaseModel):
 
 @router.get("/list", response_model=SubscriptionPlansResponse)
 async def get_subscription_plans():
-    return SubscriptionPlansResponse(all=settings.SUBSCRIPTION_PLANS)
+    return SubscriptionPlansResponse(all=subscription_plans)
 
 @router.post("/check", response_model=CurrentSubscribtion)
 async def get_user_subscribtion(subscribtion: enums.SubscriptionPlanType = Depends(check_balance_and_update_token)):
