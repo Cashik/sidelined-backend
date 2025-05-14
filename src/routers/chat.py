@@ -115,7 +115,7 @@ async def get_all_ai_models():
     # TODO: добавить выключение моделей и сервисов
     # TODO: добавить кеширование данного ответа
     response: List[schemas.AiModelRestricted] = []
-    for model in ai_models.ai_models:
+    for model in ai_models.all_ai_models:
         # ищем модель в планах
         from_plan_id = None
         for plan in subscription_plans.subscription_plans:
