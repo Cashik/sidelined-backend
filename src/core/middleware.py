@@ -114,6 +114,7 @@ async def check_balance_and_update_token(
     Middleware для проверки баланса и обновления токена.
     Проверяет баланс токенов пользователя и обновляет токен при необходимости.
     """
+    
     exception = HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Balance check failed",
@@ -133,23 +134,26 @@ async def check_balance_and_update_token(
     # проверяем последнюю проверку
     current_time: int = utils_base.now_timestamp()
     
+    # Получаем пользователя из базы данных
+    user = await crud.get_user_by_id(payload.user_id, db)
+    if not user:
+        raise exception
+    
     check_time: int | None = payload.balance_check_time
     subscription_plan: enums.SubscriptionPlanType | None = payload.subscription
     check_data_in_payload = check_time is not None and subscription_plan is not None
     if check_data_in_payload and (current_time - check_time) < settings.BALANCE_CHECK_LIFETIME_SECONDS:
         logger.info(f"Balance check successful {payload}")
-        try:
+        if subscription_plan is enums.SubscriptionPlanType.BASIC:
+            # если текущий план базовый, то возвращаем минимальный план юзера, тк
+            # юзер мог повысить план, но токен еще не обновился
+            return user.subscription_plan
+        else:
             return subscription_plan
-        except ValueError:
-            logger.error(f"Invalid subscription id: {subscription_plan}")
-            pass
     
     logger.info(f"Balance check failed. New balance check")
     # проверка не прошла, значит нужно сделать новую
-    # Получаем пользователя из базы данных
-    user = await crud.get_user_by_id(payload.user_id, db)
-    if not user:
-        raise exception
+
     
     try:
         new_sub_plan: enums.SubscriptionPlanType = await utils.check_user_access(user)

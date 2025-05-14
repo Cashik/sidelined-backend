@@ -65,3 +65,6 @@ class SubscriptionPlanType(Enum):
     PRO = "Pro"
     ULTRA = "Ultra"
 
+
+class PromoCodeType(Enum):
+    PRO_UPGRADE = "pro_upgrade"

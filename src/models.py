@@ -23,14 +23,16 @@ class User(Base):
     user_context = Column(String(500), nullable=True)
     chat_settings = Column(postgresql.JSONB, nullable=True, server_default=None)
     
-    credits = Column(Integer, nullable=False, default=settings.DEFAULT_CREDITS) #!Warning: менять значение только с помощью методов из crud.py
-    credits_last_update = Column(Integer, nullable=False, default=utils_base.now_timestamp)
+    credits = Column(Integer, nullable=False, default=0) #!Warning: менять значение только с помощью методов из crud.py
+    credits_last_update = Column(Integer, nullable=False, default=0)
     pro_plan_promo_activated = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships
     chats = relationship("Chat", back_populates="user")
     facts = relationship("UserFact", back_populates="user")
     wallet_addresses = relationship("WalletAddress", back_populates="user")
+    promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
+    
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
     )
@@ -77,7 +79,7 @@ class Chat(Base):
     
     # Relationships
     user = relationship("User", back_populates="chats")
-    messages = relationship("Message", back_populates="chat")
+    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
     
 class Message(Base):
     __tablename__ = "message"
@@ -95,5 +97,27 @@ class Message(Base):
     
     # Relationships
     chat = relationship("Chat", back_populates="messages")
-    
 
+
+class PromoCode(Base):
+    __tablename__ = "promo_code"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False, unique=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    valid_until = Column(Integer, nullable=False)
+
+    # Relationships
+    usage = relationship("PromoCodeUsage", back_populates="promo_code")
+
+class PromoCodeUsage(Base):
+    __tablename__ = "promo_code_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    promo_code_id = Column(Integer, ForeignKey("promo_code.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    used_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+
+    # Relationships
+    promo_code = relationship("PromoCode", back_populates="usage")
+    user = relationship("User", back_populates="promo_code_usage")

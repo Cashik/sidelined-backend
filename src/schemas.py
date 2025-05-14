@@ -311,3 +311,6 @@ class AiModelRestricted(AIModel):
 class ToolboxRestricted(Toolbox):
     from_plan_id: enums.SubscriptionPlanType
 
+class PromoCodeActivateRequest(BaseModel):
+    code: str
+

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from src import models, schemas, enums, exceptions, utils_base
 from src.config.settings import settings
+import src.config.subscription_plans as subscriptions
 
 import logging
 
@@ -436,6 +437,10 @@ async def delete_user(user: models.User, session: Session) -> None:
     for address in user.wallet_addresses:
         session.delete(address)
     
+    # Удаляем все активации промо-кодов
+    for promo_code_usage in user.promo_code_usage:
+        session.delete(promo_code_usage)
+    
     # Удаляем самого пользователя
     session.delete(user)
     session.commit()
@@ -472,17 +477,77 @@ async def change_user_credits(db, user: models.User, amount: int):
     if result.rowcount == 0:
         raise exceptions.BusinessError(code="change_credits_failed", message="Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
 
-async def refresh_user_credits(db, user: models.User):
+async def refresh_user_credits(db: Session, user: models.User, subscription_id: enums.SubscriptionPlanType):
     """
     Обновляет баланс кредитов пользователя если прошло больше 24 часов с последнего обновления
     """
+    current_plan: schemas.SubscriptionPlanExtended = subscriptions.get_subscription_plan(subscription_id)
+    current_plan.max_credits
+    
     if user.credits_last_update is None or user.credits_last_update < utils_base.now_timestamp() - 60*60*24:
         db.execute(
             update(models.User)
             .where(models.User.id == user.id)
-            .values(credits=settings.DEFAULT_CREDITS, credits_last_update=utils_base.now_timestamp())
+            .values(credits=current_plan.max_credits, credits_last_update=utils_base.now_timestamp())
         )
         db.commit()
 
 
-
+async def activate_promo_code(db: Session, user: models.User, code: str):
+    # Активирует промо-код для пользователя
+    # Выкидываем если что-то пошло не так
+    
+    # Проверяем, существует ли промо-код
+    promo_code_stmt = select(models.PromoCode).where(
+        models.PromoCode.code == code
+    )
+    promo_code = db.execute(promo_code_stmt).scalar_one_or_none()
+    
+    if not promo_code:
+        raise exceptions.PromoCodeActivationError("This promo code is not valid")
+    
+    # Проверяем, истек ли срок действия промо-кода
+    if promo_code.valid_until < utils_base.now_timestamp():
+        error_msg = "This promo code is expired"
+        if settings.DEBUG:
+            error_msg += f" (valid_until: {promo_code.valid_until}, now: {utils_base.now_timestamp()})"
+        raise exceptions.PromoCodeActivationError(error_msg)
+    
+    # Проверяем, активировал ли пользователь этот код ранее
+    usage_stmt = select(models.PromoCodeUsage).where(
+        models.PromoCodeUsage.promo_code_id == promo_code.id,
+        models.PromoCodeUsage.user_id == user.id
+    )
+    usage = db.execute(usage_stmt).scalar_one_or_none()
+    
+    if usage:
+        raise exceptions.PromoCodeActivationError("You have already used this promo code")
+    
+    # Запоминаем использование промо-кода
+    usage = models.PromoCodeUsage(
+        promo_code_id=promo_code.id,
+        user_id=user.id
+    )
+    db.add(usage)
+    # Активируем промо-код
+    user.pro_plan_promo_activated = True
+    db.add(user)
+    db.commit()
+    
+    
+def create_promo_code(session: Session, code: str, valid_until: int):
+    promo_code = models.PromoCode(
+        code=code,
+        valid_until=valid_until
+    )
+    session.add(promo_code)
+    session.commit()
+    
+def change_promo_code(session: Session, code: str, valid_until: int):
+    promo_code = session.execute(select(models.PromoCode).where(models.PromoCode.code == code)).scalar_one_or_none()
+    if not promo_code:
+        raise exceptions.PromoCodeNotFoundError()
+    promo_code.valid_until = valid_until
+    session.add(promo_code)
+    session.commit()
+    

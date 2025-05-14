@@ -12,4 +12,6 @@ def now_timestamp():
     return int(time.time())
 
 
-
+def format_promo_code(code: str) -> str:
+    """Форматирование промо-кода"""
+    return code.strip().lower()

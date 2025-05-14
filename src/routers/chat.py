@@ -294,7 +294,7 @@ async def create_message_stream(
     # TODO: списывать кредиты после успешного ответа
     try:
         # Обновляем баланс кредитов перед началом генерации
-        await crud.refresh_user_credits(db, user)
+        await crud.refresh_user_credits(db, user, user_subscription_id)
         await crud.change_user_credits(db, user, -1)
     except exceptions.BusinessError as e:
         raise exceptions.APIError(code=e.code, message=e.message, status_code=403)

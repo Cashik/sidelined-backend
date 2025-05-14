@@ -63,3 +63,7 @@ class AddMessageError(BusinessError):
     def __init__(self):
         super().__init__(code="add_message_error", message="Error while adding message to chat")
 
+class PromoCodeActivationError(BusinessError):
+    def __init__(self, message: str):
+        super().__init__(code="promo_code_activation_error", message=message)
+
