@@ -35,10 +35,11 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     chat: schemas.Chat
 
-
-
-class AllAiModelsesponse(BaseModel):
-    models: List[schemas.AiModelRestricted]
+class AllSettingsResponse(BaseModel):
+    default_chat_model_id: enums.Model
+    chat_models: List[schemas.AiModelRestricted]
+    chat_styles: List[enums.ChatStyle]
+    chat_details_levels: List[enums.ChatDetailsLevel]
 
 class UserMessageCreateRequest(BaseModel):
     chat_id: Optional[int] = None
@@ -110,11 +111,30 @@ async def user_to_assistant_generate_data(user: models.User, create_message_requ
     assistant_generate_data.chat.messages.update({next_nonce: [user_new_message]})
     return assistant_generate_data, user_new_message
 
-@router.get("/models/all", response_model=AllAiModelsesponse)
-async def get_all_ai_models():
+
+@router.get("/all", response_model=ChatsResponse)
+async def get_chats(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    chats = await crud.get_user_chats_summary(db, user.id)
+    return ChatsResponse(chats=chats)
+
+
+@router.get("/{id}", response_model=ChatResponse)
+async def get_chat(id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    chat = await crud.get_user_chat(db, id, user.id, from_nonce=0)
+    return ChatResponse(chat=chat)
+
+
+@router.post("/delete", response_model=DeleteResponse)
+async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    await crud.delete_chat(db, request.chat_id, user.id)
+    return DeleteResponse()
+
+
+@router.get("/settings/all", response_model=AllSettingsResponse)
+async def get_all_chat_settings():
     # TODO: добавить выключение моделей и сервисов
     # TODO: добавить кеширование данного ответа
-    response: List[schemas.AiModelRestricted] = []
+    all_models: List[schemas.AiModelRestricted] = []
     for model in ai_models.all_ai_models:
         # ищем модель в планах
         from_plan_id = None
@@ -125,29 +145,17 @@ async def get_all_ai_models():
         
         # если модель не найдена в планах, то она недоступна
         if from_plan_id is not None:
-            response.append(schemas.AiModelRestricted(
+            all_models.append(schemas.AiModelRestricted(
                 **model.model_dump(),
                 from_plan_id=from_plan_id,
             ))
-    return AllAiModelsesponse(models=response)
-
-# Устаревший роутер, который возвращает все модели, которые можно использовать
-@router.get("/providers", response_model=AllAiModelsesponse)
-async def get_providers():
-    # TODO: добавить выключение моделей и сервисов
-    # TODO: добавить кеширование данного ответа
-    return AllAiModelsesponse(models=list(enums.Model))
-
-
-@router.get("/all", response_model=ChatsResponse)
-async def get_chats(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    chats = await crud.get_user_chats_summary(db, user.id)
-    return ChatsResponse(chats=chats)
-
-@router.get("/{id}", response_model=ChatResponse)
-async def get_chat(id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    chat = await crud.get_user_chat(db, id, user.id, from_nonce=0)
-    return ChatResponse(chat=chat)
+    
+    return AllSettingsResponse(
+        default_chat_model_id=settings.DEFAULT_AI_MODEL,
+        chat_models=all_models,
+        chat_styles=list(enums.ChatStyle),
+        chat_details_levels=list(enums.ChatDetailsLevel),
+    )
 
 
 async def stream_and_collect_messages(
@@ -253,6 +261,7 @@ async def stream_and_collect_messages(
 
     return
 
+
 @router.post("/message/regenerate", response_model=CreateMessageResponse)
 async def regenerate_message(
     request: RegenerateMessageRequest,
@@ -347,14 +356,10 @@ async def create_message_stream(
     
     return StreamingResponse(wrapped_stream(), media_type="text/event-stream")
 
-@router.post("/delete", response_model=DeleteResponse)
-async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    await crud.delete_chat(db, request.chat_id, user.id)
-    return DeleteResponse()
-
 
 class ToolsResponse(BaseModel):
     toolboxes: List[schemas.ToolboxRestricted]
+    
     
 @router.get("/tools/standart/all", response_model=ToolsResponse)
 async def get_tools():
@@ -380,6 +385,7 @@ async def get_tools():
     
     return ToolsResponse(toolboxes=response)
 
+
 class CallToolRequest(BaseModel):
     chat_id: Optional[int] = None
     toolbox_name: str
@@ -390,6 +396,7 @@ class CallToolResponse(BaseModel):
     result: schemas.ToolCallMessage
     chat: schemas.Chat
     
+
 @router.post("/tools/call", response_model=CallToolResponse)
 async def call_tool(
     request: CallToolRequest,
@@ -497,6 +504,7 @@ async def call_tool(
         raise exceptions.APIError(code="message_save_failed", message=f"Error saving message: {str(e)}", status_code=500)
 
     return CallToolResponse(result=tool_message, chat=chat)
+
 
 def validate_tool_input(schema, input_data):
     """
