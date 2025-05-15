@@ -47,7 +47,41 @@ pro_plan_requirements = [
             name="Monprotocol"
         ),
         balance=200
-    )
+    ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0xBC7F9Fc7693AB20aDbF913537Ecb6535864C6c5C",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="aTRUST",
+            name="Staked $TRUST"
+        ),
+        balance=10_000
+    ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0xc841b4ead3f70be99472ffdb88e5c3c7af6a481a",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="TRUST",
+            name="Trust me bros"
+        ),
+        balance=10_000
+    ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0x79dacb99a8698052a9898e81fdf883c29efb93cb",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="ACOLYT",
+            name="SIgnal"
+        ),
+        balance=1_000
+    ),
+   
 ]
 
 ultra_plan_requirements = [
