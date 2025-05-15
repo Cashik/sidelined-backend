@@ -87,11 +87,11 @@ pro_plan_requirements = [
 ultra_plan_requirements = [
     schemas.TokenRequirement(
         token=project_tokens["RIZ"],
-        balance=8000
+        balance=10_000
     ),
     schemas.TokenRequirement(
         token=project_tokens["wRIZ"],
-        balance=8000
+        balance=10_000
     ),
     schemas.TokenRequirement(
         token=project_tokens["ZNL"],
