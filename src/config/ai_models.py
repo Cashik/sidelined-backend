@@ -4,7 +4,7 @@ all_ai_models = [
     schemas.AIModel(
         id=enums.Model.GPT_4O,
         provider=enums.Service.OPENAI,
-        name="GPT-4O",
+        name="GPT-4o",
         description="Fast, intelligent, flexible GPT model"
     ),
     schemas.AIModel(
@@ -22,13 +22,13 @@ all_ai_models = [
     schemas.AIModel(
         id=enums.Model.GEMINI_2_5_PRO,
         provider=enums.Service.GEMINI,
-        name="gemini-2.5-pro-preview-03-25",
+        name="Gemeni 2.5 Pro",
         description="Intelligent and flexible Gemini model"
     ),
     schemas.AIModel(
         id=enums.Model.GEMINI_2_5_FLASH,
         provider=enums.Service.GEMINI,
-        name="gemini-2.5-flash-preview-04-17",
+        name="Gemeni 2.5 Flash",
         description="Fast and flexible Gemini model"
     )
 ]
