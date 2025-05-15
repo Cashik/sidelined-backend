@@ -8,7 +8,7 @@ from src import schemas, enums, models, crud, utils, exceptions
 from src.core.crypto import verify_signature, validate_payload
 from src.core.middleware import get_current_user
 from src.database import get_session
-from src.config import settings
+from src.config.settings import settings
 from src.exceptions import (
     AddressAlreadyExistsError, AddressNotFoundError, LastAddressError, FactNotFoundError, APIError
 )
@@ -22,11 +22,6 @@ class UserProfileUpdateRequest(BaseModel):
 class ChatSettingsUpdateRequest(schemas.UserChatSettings):
     pass
 
-class AvailableSettingsResponse(BaseModel):
-    default_chat_model: enums.Model
-    chat_models: List[enums.Model]
-    chat_styles: List[enums.ChatStyle]
-    chat_details_levels: List[enums.ChatDetailsLevel]
 
 class UserFactDeleteRequest(BaseModel):
     id: int
@@ -41,6 +36,7 @@ class WalletAddressAddRequest(BaseModel):
 class WalletAddressDeleteRequest(BaseModel):
     address: str
 
+
 def db_user_to_schema_user(user: models.User) -> schemas.User:
     facts = [schemas.UserFact(id=fact.id, description=fact.description, created_at=fact.created_at) for fact in user.facts]
     wallet_addresses = [schemas.WalletAddress(address=wallet.address, created_at=wallet.created_at) for wallet in user.wallet_addresses]
@@ -50,7 +46,6 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
         chat_settings = schemas.MessageGenerationSettings()
     
     return schemas.User(
-        credits=user.credits,
         profile=schemas.UserProfile(
             preferred_name=user.preferred_name, 
             user_context=user.user_context,
@@ -69,14 +64,6 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
 async def get_user(user: models.User = Depends(get_current_user)):
     return db_user_to_schema_user(user)
 
-@router.get("/settings/chat", response_model=AvailableSettingsResponse)
-async def get_available_settings():
-    return AvailableSettingsResponse(
-        default_chat_model=settings.DEFAULT_AI_MODEL,
-        chat_models=list(enums.Model),
-        chat_styles=list(enums.ChatStyle),
-        chat_details_levels=list(enums.ChatDetailsLevel)
-    )
 
 @router.post("/settings/chat", response_model=schemas.UserChatSettings)
 async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
@@ -93,6 +80,7 @@ async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.
         user_chat_settings_response.preferred_chat_style = user_chat_settings.chat_style
         user_chat_settings_response.preferred_chat_details_level = user_chat_settings.chat_details_level
     return user_chat_settings_response
+
 
 @router.post("/settings/profile", response_model=schemas.User)
 async def update_user_settings(request: UserProfileUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
@@ -115,6 +103,7 @@ async def delete_user_fact(request: UserFactDeleteRequest, user: models.User = D
         raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
         raise
+
 
 @router.post("/wallet/add", response_model=schemas.WalletAddress)
 async def add_wallet_address(
@@ -151,6 +140,7 @@ async def add_wallet_address(
         raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:
         raise
+
 
 @router.post("/wallet/delete")
 async def delete_wallet_address(

@@ -1,8 +1,9 @@
+import functools
 import re
 import time
 import json
 import os
-from typing import AsyncGenerator, Optional, Dict, List, Any
+from typing import AsyncGenerator, Callable, Optional, Dict, List, Any, TypeVar
 import logging
 import openai
 from openai import OpenAI
@@ -11,19 +12,37 @@ from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
 
 
 from src import schemas, enums, models, exceptions, crud
-from src.config import settings
-from src.services import thirdweb_service
+from src.config.settings import settings
+from src.config.subscription_plans import subscription_plans
 from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
-from src.providers import openai, gemini
-from src.mcp_servers import mcp_servers as mcp_servers_list
+from src.config.mcp_servers import mcp_servers as mcp_servers_list
 from src.utils_base import now_timestamp
+import inspect
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# декоратор для отлова ошибок и возвращения json
+def catch_errors(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Возвращает обёртку-клон. При исключении → {"error": ...}."""
+    debug = getattr(settings, "DEBUG", False)
 
+    if inspect.iscoroutinefunction(fn):              # async-функция / coroutine
+        @functools.wraps(fn)
+        async def _async(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as e:
+                return json.dumps({"error": str(e) if debug else "Error occurred while executing tool."})
+        return _async                                # type: ignore[return-value]
 
-
+    @functools.wraps(fn)                             # обычная sync-функция
+    def _sync(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            return json.dumps({"error": str(e) if debug else "Error occurred while executing tool."})
+    return _sync  
 
 async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.MessageUnion]:
     """
@@ -102,7 +121,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
                             created_at=now_timestamp(),
                             selected_at=now_timestamp()
                         ))
-                    except exceptions.FactNotFoundException as e:
+                    except exceptions.FactNotFoundError as e:
                         logger.error(f"Error deleting notes: {e}")
                         result_messages.append(schemas.MessageBase(
                             content=f"Error deleting notes: {str(e)}",
@@ -127,7 +146,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         
         return result_messages
         
-    except exceptions.InvalidNonceException as e:
+    except exceptions.InvalidNonceError as e:
         # В случае ошибки создаем сообщение с текстом ошибки
         if settings.DEBUG:
             error_message = f"Error while generating answer details: {str(e)}"
@@ -232,24 +251,12 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain.agents import create_tool_calling_agent, AgentExecutor
     from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
-    from src.mcp_servers import mcp_servers as mcp_servers_list
-    from src.mcp_servers import prebuild_toolboxes
-
-    mcp_servers = {}
-    for server in mcp_servers_list:
-        mcp_server = {
-            "url": server.url,
-            "transport": server.transport
-        }
-        mcp_servers[server.name] = mcp_server
-    
-    mcp_multi_client = MultiServerMCPClient(mcp_servers)
-    
+    from src.config.mcp_servers import mcp_servers as mcp_servers_list
+    from src.config.mcp_servers import prebuild_toolboxes
 
     logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
     logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
     
-    # Некоторые модели не поддерживают системные роли или другие роли
     messages = prompt_service.generate_langchain_messages()
 
     logger.info(f"Sending request to Gemini with messages: {messages}")
@@ -281,14 +288,35 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
         api_key=api_key
     )
 
+    mcp_servers = {}
+    for toolbox_id, server in mcp_servers_list.items():
+        mcp_server = {
+            "url": server.url,
+            "transport": server.transport
+        }
+        if toolbox_id in prompt_service.generate_data.toolbox_ids:
+            mcp_servers[server.name] = mcp_server
+    
+    mcp_multi_client = MultiServerMCPClient(mcp_servers)
+    
     # Генерируем ответ, используя MCP сессию
-    async with mcp_multi_client as mcp_session:
+    async with mcp_multi_client as multi_mcp_session:
         logger.info(f"Generating response with MCP tools ...")
-        tools = mcp_session.get_tools()
+        tools = multi_mcp_session.get_tools()
         
         # расширяем инструменты дефолтным тулбоксом
         for toolbox in prebuild_toolboxes:
-            tools.extend(toolbox.tools)
+            if toolbox.id in prompt_service.generate_data.toolbox_ids:
+                tools.extend(toolbox.tools)
+
+        # декорируем инструменты чтобы отлавливать ошибки
+        for tool in tools:
+            if hasattr(tool, "func") and callable(tool.func):
+                tool.func = catch_errors(tool.func)          # sync-инструмент
+            elif hasattr(tool, "coroutine") and callable(tool.coroutine):
+                tool.coroutine = catch_errors(tool.coroutine)  # async-инструмент
+            else:
+                logger.error(f"Error: Tool {tool.name} has no func or coroutine attribute")
 
         agent = create_tool_calling_agent(
             llm=llm,
@@ -364,56 +392,64 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
             error_message = f"Sorry, but some error occurred and I can't fully answer your request. Try to use other model or ask another question."
             if settings.DEBUG:
                 error_message += f"\nDebug info:{os.linesep}{str(e)}"
+            yield to_sse("message_start", {"id": cur_msg_id})
+            yield to_sse("message_chunk", {"id": cur_msg_id, "text": error_message})
             yield to_sse("message_end", {"id": cur_msg_id, "text": error_message, "generation_time_ms": 0})
         finally:
             yield to_sse("generation_end", {})
 
         
         
-async def check_user_access(user: models.User) -> bool:
+async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     """
-    Проверка баланса пользователя в Thirdweb по всем его кошелькам
+    Проверка баланса пользователя по списку требований.
+
+    Сначала получаем балансы наших токенов и проверям по ним.
+    На этом этапе пользоваль может уже получить Ultra или Pro доступ.
+
+    Если нет, то проверяем балансы токенов партнеров для получения Pro доступа.
+    
+    Если и это нет, то выдаем Basic доступ.
     """
-    # не отсеиваем ничего, проверяем все требования
-    erc20_requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.interface == enums.TokenInterface.ERC20]
-    erc721_requirements = [req for req in settings.TOKEN_REQUIREMENTS if req.token.interface == enums.TokenInterface.ERC721]
+    # TODO: можно оптимизировать, сгруппировать по цепочкам или вручную проверять отдельно токены нашего проекта
     
-    if not erc20_requirements and not erc721_requirements:
-        return False
-    
-    # Если у пользователя нет адресов, то доступ запрещен
-    if not user.wallet_addresses:
-        return False
-    
-    # какие-то требования остались, значит нужно проверить балансы
     web3_service = Web3Service(settings.ANKR_API_KEY)
     
-    # Проверяем каждый адрес кошелька пользователя
-    for wallet in user.wallet_addresses:
-        user_address = wallet.address
+    for plan in reversed(subscription_plans):
+        # проверяем все требования плана
+        erc20_requirements = [req for req in plan.requirements if req.token.interface == enums.TokenInterface.ERC20]
+        erc721_requirements = [req for req in plan.requirements if req.token.interface == enums.TokenInterface.ERC721]
         
-        # проверяем erc721 токены
-        if erc721_requirements:
-            try:
-                # TODO: можно оптимизировать, сгруппировать по цепочкам
-                for req in erc721_requirements:
-                    raw_balance = web3_service.get_ERC721_balance(req.token.address, user_address, req.token.chain_id)
-                    natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
-                    if natural_balance >= req.balance:
-                        return True
-            except exceptions.Web3ServiceError:
-                return settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN
-
-        # проверяем erc20 токены
-        if erc20_requirements:
-            try:
-                for req in erc20_requirements:
-                    raw_balance = web3_service.get_ERC20_balance(req.token.address, user_address, req.token.chain_id)
-                    natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
-                    if natural_balance >= req.balance:
-                        return True
-            except exceptions.Web3ServiceError:
-                return settings.ALLOW_CHAT_WHEN_SERVER_IS_DOWN
+        if not erc20_requirements and not erc721_requirements:
+            continue
+        
+        # Проверяем каждый адрес кошелька пользователя
+        for wallet in user.wallet_addresses:
+            user_address = wallet.address
+            # проверяем erc721 токены
+            if erc721_requirements:
+                try:
+                    for req in erc721_requirements:
+                        raw_balance = web3_service.get_ERC721_balance(req.token.address, user_address, req.token.chain_id)
+                        natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
+                        if natural_balance >= req.balance:
+                            logger.info(f"User {user_address} has enough ERC721 balance for {plan.id} subscription")
+                            return plan.id
+                except exceptions.Web3ServiceError as e:
+                    logger.error(f"Error checking ERC721 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
+                    pass
+            # проверяем erc20 токены
+            if erc20_requirements:
+                try:
+                    for req in erc20_requirements:
+                        raw_balance = web3_service.get_ERC20_balance(req.token.address, user_address, req.token.chain_id)
+                        natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
+                        if natural_balance >= req.balance:
+                            logger.info(f"User {user_address} has enough ERC20{req.token.name} balance({natural_balance}) for {plan.id} subscription")
+                            return plan.id
+                except exceptions.Web3ServiceError as e:
+                    logger.error(f"Error checking ERC20 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
+                    pass
     
-    # ничего не подошло, значит баланс не соответствует ни одному требованию
-    return False
+    # не смогли найти ни одного требования, возвращаем базовый доступ юзера
+    return user.subscription_plan

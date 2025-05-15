@@ -4,53 +4,6 @@ import os
 from pydantic import ConfigDict, validator
 from src import enums, schemas
 
-requirements = [
-    schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.BASE,
-            address="0x67543CF0304C19CA62AC95ba82FD4F4B40788dc1",
-            interface=enums.TokenInterface.ERC20,
-            decimals=8,
-            symbol="RIZ",
-            name="Rivals Network"
-        ),
-        balance=1000
-    ),
-    schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.BASE,
-            address="0xA70acF9Cbb8CA5F6c2A9273283fb17C195ab7a43",
-            interface=enums.TokenInterface.ERC20,
-            decimals=8,
-            symbol="wRIZ",
-            name="Staked RIZ"
-        ),
-        balance=1000
-    ),
-    schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.ARBITRUM,
-            address="0x78bDE7b6C7eB8f5F1641658c698fD3BC49738367",
-            interface=enums.TokenInterface.ERC721,
-            decimals=0,
-            symbol="ZNL",
-            name="ZNodeLicense"
-        ),
-        balance=1
-    ),
-    schemas.TokenRequirement(
-        token=schemas.Token(
-            chain_id=enums.ChainID.ETHEREUM,
-            address="0xc555D625828c4527d477e595fF1Dd5801B4a600e",
-            interface=enums.TokenInterface.ERC20,
-            decimals=18,
-            symbol="MON",
-            name="Monprotocol"
-        ),
-        balance=200
-    )
-]
-
 
 class Settings(BaseSettings):
     # Server settings
@@ -94,7 +47,6 @@ class Settings(BaseSettings):
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Token requirements
-    TOKEN_REQUIREMENTS: list[schemas.TokenRequirement] = requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
     # MCP Servers and tools API keys
@@ -103,16 +55,6 @@ class Settings(BaseSettings):
     EXA_SEARCH_API_KEY: str | None = None
     
     ANKR_API_KEY: str
-    
-    @validator('TOKEN_REQUIREMENTS')
-    def validate_token_requirements(cls, v):
-        for req in v:
-            if req.token.interface not in [enums.TokenInterface.ERC20, enums.TokenInterface.ERC721]:
-                raise NotImplementedError(
-                    f"Currently only ERC20 and ERC721 tokens are supported. "
-                    f"Found {req.token.interface.value} interface in configuration."
-                )
-        return v
     
     @property
     def DATABASE_URL(self) -> str:

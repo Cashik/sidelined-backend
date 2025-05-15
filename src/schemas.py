@@ -37,7 +37,10 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    chat_available: bool
+    subscription_id: enums.SubscriptionPlanType
+    # TODO: убрать chat_available - устарело
+    chat_available: bool = True
+    
 
 
 class IsLoginResponse(BaseModel):
@@ -67,7 +70,6 @@ class UserChatSettings(BaseModel):
 
 class User(BaseModel):
     profile: UserProfile
-    credits: int
     chat_settings: UserChatSettings
     connected_wallets: List[WalletAddress]
 
@@ -87,13 +89,17 @@ class TokenRequirement(BaseModel):
     # ! количество токенов не учитывающее десятичные значения
     # т.е. если токен имеет 8 десятичных знаков, то для 1 токена значение будет 100000000
     balance: float
-    
-# схема токена авторизации
 
+
+# схема токена авторизации
 class TokenPayload(BaseModel):
     user_id: int
-    balance_check_time: int  # timestamp последней проверки
-    balance_check_success: bool  # результат проверки
+    balance_check_time: Optional[int] = None  # timestamp последней проверки
+    subscription: Optional[enums.SubscriptionPlanType] = None
+
+class AppTokenPayload(TokenPayload):
+    exp: int
+    iat: int = Field(default_factory=utils_base.now_timestamp)
 
 # бизнес-схемы чата
 
@@ -216,6 +222,7 @@ class AssistantGenerateData(BaseModel):
     user: UserProfileData
     chat: Chat
     chat_settings: GenerateMessageSettings
+    toolbox_ids: List[enums.ToolboxList] = []
 
     
 # Схемы для вызова функций
@@ -259,6 +266,7 @@ class MCPWebSocketServer(MCPServerConfig):
     transport: str = "websocket"
 
 class Toolbox(BaseModel):
+    id: enums.ToolboxList
     name: str
     description: str
     tools: List[BaseTool]
@@ -271,4 +279,37 @@ class APIErrorContent(BaseModel):
 
 class APIErrorResponse(BaseModel):
     error: APIErrorContent
+
+
+class AIModel(BaseModel):
+    id: enums.Model
+    provider: enums.Service
+    name: str
+    description: str
+    input_types: list[enums.MessageType] = [enums.MessageType.TEXT, enums.MessageType.TOOL_CALL]
+    output_types: list[enums.MessageType] = [enums.MessageType.TEXT, enums.MessageType.TOOL_CALL]
+
+# Схемы для подписок
+
+class SubscriptionPlan(BaseModel):
+    id: enums.SubscriptionPlanType
+    name: str
+    requirements: List[TokenRequirement]
+    max_credits: int
+
+# дополненная схема подписки с доп информацие о функциях и моделях
+class SubscriptionPlanExtended(SubscriptionPlan):
+    available_models_ids: List[enums.Model]
+    available_toolboxes_ids: List[enums.ToolboxList]
+
+# cхемы с прописанными ограничениями на план
+
+class AiModelRestricted(AIModel):
+    from_plan_id: enums.SubscriptionPlanType
+
+class ToolboxRestricted(Toolbox):
+    from_plan_id: enums.SubscriptionPlanType
+
+class PromoCodeActivateRequest(BaseModel):
+    code: str
 

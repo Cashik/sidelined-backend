@@ -19,15 +19,15 @@ from fastapi.exceptions import RequestValidationError
 from src.exceptions import BusinessError
 from pydantic import BaseModel
 
-from src.config import settings
+from src.config.settings import settings
 from src.database import get_session
 from src.models import *
-from src.routers import auth, chat, user, requirements
+from src.routers import auth, chat, user, subscription
 from src.schemas import APIErrorContent, APIErrorResponse
 from src.exceptions import APIError
 
 app = FastAPI(
-    title="2Eden API - Swagger UI",
+    title="Sidelined API - Swagger UI",
     default_response_class=JSONResponse,
     prefix="/api"
 )
@@ -60,25 +60,17 @@ app.add_middleware(
     expose_headers=["X-New-Token"],
 )
 
-def get_db():
-    db = next(get_session())
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 # Подключаем роутеры
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(user.router)
-app.include_router(requirements.router)
+app.include_router(subscription.router)
 
 
 @app.on_event("startup")
 async def startup_event():
-    import src.mcp_servers
-    await src.mcp_servers.sync_toolboxes()
+    import src.config.mcp_servers
+    await src.config.mcp_servers.sync_toolboxes()
 
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):

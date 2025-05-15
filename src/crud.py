@@ -2,11 +2,10 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
 from sqlalchemy import select, delete, or_, and_, func, desc, update
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-import time
 
 from src import models, schemas, enums, exceptions, utils_base
-from src.config import settings
+from src.config.settings import settings
+import src.config.subscription_plans as subscriptions
 
 import logging
 
@@ -100,11 +99,11 @@ async def get_user_chat(
     
     # Проверяем, существует ли чат
     if not chat:
-        raise exceptions.ChatNotFoundException()
+        raise exceptions.ChatNotFoundError()
     
     # Проверяем, принадлежит ли чат пользователю
     if chat.user_id != user_id:
-        raise exceptions.UserNotChatOwnerException()
+        raise exceptions.UserNotChatOwnerError()
     
     # Формируем запрос для получения сообщений с учетом nonce
     messages_stmt = select(models.Message).where(
@@ -233,11 +232,11 @@ async def delete_chat(db: Session, chat_id: int, user_id: int) -> schemas.Chat:
     
     # Проверяем, существует ли чат
     if not chat:
-        raise exceptions.ChatNotFoundException()
+        raise exceptions.ChatNotFoundError()
     
     # Проверяем, принадлежит ли чат пользователю
     if chat.user_id != user_id:
-        raise exceptions.UserNotChatOwnerException()
+        raise exceptions.UserNotChatOwnerError()
     
     # Скрываем чат (устанавливаем visible=False)
     chat.visible = False
@@ -263,7 +262,7 @@ async def update_user_chat_settings(
     """
     user = await get_user_by_id(user_id, session)
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Обновляем все поля, включая None
     user.chat_settings = settings.model_dump(mode="json")
@@ -283,7 +282,7 @@ async def update_user_profile(
     Обновление профиля пользователя
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Обновляем все поля, включая None
     user.preferred_name = profile.preferred_name
@@ -303,7 +302,7 @@ async def add_user_facts(
     Добавление новых фактов о пользователе разом
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Создаем новые факты
     new_facts = [models.UserFact(
@@ -326,7 +325,7 @@ async def delete_user_facts(
     Удаление фактов о пользователе
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
 
     deleted_facts = []
     # Удаляем факты
@@ -339,7 +338,7 @@ async def delete_user_facts(
         fact = session.execute(fact_stmt).scalar_one_or_none()
         
         if not fact:
-            raise exceptions.FactNotFoundException(f"Fact with id {fact_id} not found")
+            raise exceptions.FactNotFoundError(f"Fact with id {fact_id} not found")
         
         # Удаляем факт
         session.delete(fact)
@@ -424,7 +423,7 @@ async def delete_user(user: models.User, session: Session) -> None:
     - Адреса кошельков
     """
     if not user:
-        raise exceptions.UserNotFoundException()
+        raise exceptions.UserNotFoundError()
     
     # Удаляем все чаты пользователя (это автоматически удалит все сообщения)
     for chat in user.chats:
@@ -437,6 +436,10 @@ async def delete_user(user: models.User, session: Session) -> None:
     # Удаляем все адреса кошельков
     for address in user.wallet_addresses:
         session.delete(address)
+    
+    # Удаляем все активации промо-кодов
+    for promo_code_usage in user.promo_code_usage:
+        session.delete(promo_code_usage)
     
     # Удаляем самого пользователя
     session.delete(user)
@@ -460,31 +463,88 @@ async def get_user_messages_to_analyze(user: models.User, session: Session) -> L
     )
     return session.execute(stmt).scalars().all()
 
-async def change_user_credits(db, user: models.User, amount: int):
+async def change_user_credits(db, user_id: int, amount: int):
     """
     Атомарно списывает (или добавляет) кредиты пользователю.
     Если amount < 0 — списание, если > 0 — пополнение.
     """
     result = db.execute(
         update(models.User)
-        .where(models.User.id == user.id)
-        .values(credits=models.User.credits + amount)
+        .where(models.User.id == user_id)
+        .values(used_credits_today=models.User.used_credits_today + amount)
     )
     db.commit()
     if result.rowcount == 0:
-        raise exceptions.BusinessError(code="change_credits_failed", message="Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
+        raise exceptions.BusinessError(code="change_credits_failed", message="Error use credits")
 
-async def refresh_user_credits(db, user: models.User):
+async def refresh_user_credits(db: Session, user: models.User):
     """
-    Обновляет баланс кредитов пользователя если прошло больше 24 часов с последнего обновления
+    Сбрасываем использованные кредиты пользователя если прошло больше 24 часов с последнего сброса
     """
-    if user.credits_last_update is None or user.credits_last_update < utils_base.now_timestamp() - 60*60*24:
+    if user.credits_last_reset is None or user.credits_last_reset < utils_base.now_timestamp() - 60*60*24:
         db.execute(
             update(models.User)
             .where(models.User.id == user.id)
-            .values(credits=settings.DEFAULT_CREDITS, credits_last_update=utils_base.now_timestamp())
+            .values(used_credits_today=0, credits_last_update=utils_base.now_timestamp())
         )
         db.commit()
 
 
-
+async def activate_promo_code(db: Session, user: models.User, code: str):
+    # Активирует промо-код для пользователя
+    # Выкидываем если что-то пошло не так
+    
+    # Проверяем, существует ли промо-код
+    promo_code_stmt = select(models.PromoCode).where(
+        models.PromoCode.code == code
+    )
+    promo_code = db.execute(promo_code_stmt).scalar_one_or_none()
+    
+    if not promo_code:
+        raise exceptions.PromoCodeActivationError("This promo code is not valid")
+    
+    # Проверяем, истек ли срок действия промо-кода
+    if promo_code.valid_until < utils_base.now_timestamp():
+        error_msg = "This promo code is expired"
+        if settings.DEBUG:
+            error_msg += f" (valid_until: {promo_code.valid_until}, now: {utils_base.now_timestamp()})"
+        raise exceptions.PromoCodeActivationError(error_msg)
+    
+    # Проверяем, активировал ли пользователь этот код ранее
+    usage_stmt = select(models.PromoCodeUsage).where(
+        models.PromoCodeUsage.promo_code_id == promo_code.id,
+        models.PromoCodeUsage.user_id == user.id
+    )
+    usage = db.execute(usage_stmt).scalar_one_or_none()
+    
+    if usage:
+        raise exceptions.PromoCodeActivationError("You have already used this promo code")
+    
+    # Запоминаем использование промо-кода
+    usage = models.PromoCodeUsage(
+        promo_code_id=promo_code.id,
+        user_id=user.id
+    )
+    db.add(usage)
+    # Активируем промо-код
+    user.pro_plan_promo_activated = True
+    db.add(user)
+    db.commit()
+    
+    
+def create_promo_code(session: Session, code: str, valid_until: int):
+    promo_code = models.PromoCode(
+        code=code,
+        valid_until=valid_until
+    )
+    session.add(promo_code)
+    session.commit()
+    
+def change_promo_code(session: Session, code: str, valid_until: int):
+    promo_code = session.execute(select(models.PromoCode).where(models.PromoCode.code == code)).scalar_one_or_none()
+    if not promo_code:
+        raise exceptions.PromoCodeNotFoundError()
+    promo_code.valid_until = valid_until
+    session.add(promo_code)
+    session.commit()
+    

@@ -13,10 +13,11 @@ import time
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
-from src.config import settings
 from src.services import user_context_service
-
-
+from src.config.settings import settings
+from src.config.mcp_servers import get_toolboxes, mcp_servers
+from src.services.prompt_service import PromptService
+from src.config import ai_models, subscription_plans
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,8 +35,11 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     chat: schemas.Chat
 
-class ProvidersResponse(BaseModel):
-    models: List[enums.Model]
+class AllSettingsResponse(BaseModel):
+    default_chat_model_id: enums.Model
+    chat_models: List[schemas.AiModelRestricted]
+    chat_styles: List[enums.ChatStyle]
+    chat_details_levels: List[enums.ChatDetailsLevel]
 
 class UserMessageCreateRequest(BaseModel):
     chat_id: Optional[int] = None
@@ -65,7 +69,7 @@ class DeleteResponse(BaseModel):
     success: bool = True
 
 
-async def user_to_assistant_generate_data(user: models.User, create_message_request: UserMessageCreateRequest, chat: schemas.Chat, db: Session) -> Tuple[schemas.AssistantGenerateData, schemas.ChatMessage]:
+async def user_to_assistant_generate_data(user: models.User, create_message_request: UserMessageCreateRequest, chat: schemas.Chat) -> Tuple[schemas.AssistantGenerateData, schemas.ChatMessage]:
     model = create_message_request.model or settings.DEFAULT_AI_MODEL
     next_nonce = create_message_request.nonce if create_message_request.nonce else (max(chat.messages.keys()) if chat.messages else 0)
     user_new_message = schemas.ChatMessage(
@@ -107,21 +111,51 @@ async def user_to_assistant_generate_data(user: models.User, create_message_requ
     assistant_generate_data.chat.messages.update({next_nonce: [user_new_message]})
     return assistant_generate_data, user_new_message
 
-@router.get("/providers", response_model=ProvidersResponse)
-async def get_providers():
-    # TODO: добавить выключение моделей и сервисов
-    # TODO: добавить кеширование данного ответа
-    return ProvidersResponse(models=list(enums.Model))
 
 @router.get("/all", response_model=ChatsResponse)
 async def get_chats(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     chats = await crud.get_user_chats_summary(db, user.id)
     return ChatsResponse(chats=chats)
 
+
 @router.get("/{id}", response_model=ChatResponse)
 async def get_chat(id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     chat = await crud.get_user_chat(db, id, user.id, from_nonce=0)
     return ChatResponse(chat=chat)
+
+
+@router.post("/delete", response_model=DeleteResponse)
+async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    await crud.delete_chat(db, request.chat_id, user.id)
+    return DeleteResponse()
+
+
+@router.get("/settings/all", response_model=AllSettingsResponse)
+async def get_all_chat_settings():
+    # TODO: добавить выключение моделей и сервисов
+    # TODO: добавить кеширование данного ответа
+    all_models: List[schemas.AiModelRestricted] = []
+    for model in ai_models.all_ai_models:
+        # ищем модель в планах
+        from_plan_id = None
+        for plan in subscription_plans.subscription_plans:
+            if model.id in plan.available_models_ids:
+                from_plan_id = plan.id
+                break
+        
+        # если модель не найдена в планах, то она недоступна
+        if from_plan_id is not None:
+            all_models.append(schemas.AiModelRestricted(
+                **model.model_dump(),
+                from_plan_id=from_plan_id,
+            ))
+    
+    return AllSettingsResponse(
+        default_chat_model_id=settings.DEFAULT_AI_MODEL,
+        chat_models=all_models,
+        chat_styles=list(enums.ChatStyle),
+        chat_details_levels=list(enums.ChatDetailsLevel),
+    )
 
 
 async def stream_and_collect_messages(
@@ -222,10 +256,14 @@ async def stream_and_collect_messages(
         if delete_old_messages:
             await crud.delete_chat_messages(db, chat_id, user_message.nonce+1)
         await crud.add_chat_messages(db, chat_id, new_messages, user_id)
+        
+        # Запоминаем, что пользователь использовал кредит
+        await crud.change_user_credits(db, user_id, 1)
     except Exception as e:
         logger.error(f"Ошибка сохранения сообщений: {e}", exc_info=True)
 
     return
+
 
 @router.post("/message/regenerate", response_model=CreateMessageResponse)
 async def regenerate_message(
@@ -242,22 +280,22 @@ async def create_message_stream(
     create_message_request: UserMessageCreateRequest,
     background_tasks: BackgroundTasks,
     user: models.User = Depends(get_current_user),
+    user_subscription_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session)
 ):
-    from src.services.prompt_service import PromptService
-    from src.mcp_servers import mcp_servers as mcp_servers_list
-    from langchain_mcp_adapters.client import MultiServerMCPClient
+    # получаем подписку пользователя
+    user_subscription: schemas.SubscriptionPlanExtended = subscription_plans.get_subscription_plan(user_subscription_id)
+    # получаем доступные модели для пользователя
+    available_models = [model for model in user_subscription.available_models_ids]
+    # если модель не указана, то разрешаем использовать дефолтную модель
+    if create_message_request.model:
+        # проверяем, что модель доступна для пользователя
+        if create_message_request.model not in available_models:
+            raise exceptions.APIError(code="message_generation_failed", message="Model not available for your subscription plan.", status_code=403)
     
-    # Пытаемся списать кредиты
-    try:
-        # Обновляем баланс кредитов перед началом генерации
-        await crud.refresh_user_credits(db, user)
-        await crud.change_user_credits(db, user, -1)
-    except exceptions.BusinessError as e:
-        raise exceptions.APIError(code=e.code, message=e.message, status_code=403)
-    except Exception as e:
-        logger.error(f"Ошибка списания кредитов: {e}", exc_info=True)
-        raise exceptions.APIError(code="credit_deduction_failed", message="Out of credits. Try again later.", status_code=500)
+    # Проверяем, что у пользователь не использовал все кредиты
+    if user.used_credits_today >= user_subscription.max_credits:
+        raise exceptions.APIError(code="message_generation_failed", message="Out of credits. Try again tomorrow.", status_code=403)
     
     # Если это новый чат 
     if create_message_request.chat_id is None:
@@ -290,7 +328,9 @@ async def create_message_stream(
     logger.info(f"Сообщения в чате: {chat.messages}")
 
     # собираем все данные для генерации ответа
-    assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat, db)
+    assistant_generate_data, user_message = await user_to_assistant_generate_data(user, create_message_request, chat)
+    # получаем доступные ид тулбоксов для пользователя
+    assistant_generate_data.toolbox_ids = [toolbox_id for toolbox_id in user_subscription.available_toolboxes_ids]
     prompt_service = PromptService(assistant_generate_data)
     
     # генерируем ответ от ИИ
@@ -311,28 +351,35 @@ async def create_message_stream(
     
     return StreamingResponse(wrapped_stream(), media_type="text/event-stream")
 
-@router.post("/delete", response_model=DeleteResponse)
-async def delete_chat(request: ChatDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
-    await crud.delete_chat(db, request.chat_id, user.id)
-    return DeleteResponse()
-
 
 class ToolsResponse(BaseModel):
-    toolboxes: List[schemas.Toolbox]
+    toolboxes: List[schemas.ToolboxRestricted]
     
-@router.get("/providers", response_model=ProvidersResponse)
-async def get_providers():
-    # TODO: добавить выключение моделей и сервисов
-    # TODO: добавить кеширование данного ответа
-    return ProvidersResponse(models=list(enums.Model))
-
+    
 @router.get("/tools/standart/all", response_model=ToolsResponse)
 async def get_tools():
     # Сейчас каждый инстанс сервера будет иметь свой набор и получать его отдельно
     # ПРостое кеширование не избавит от лишних запросов при старте инстанса
-    from src.mcp_servers import get_toolboxes
-    result = await get_toolboxes()
-    return ToolsResponse(toolboxes=result)
+    response: List[schemas.ToolboxRestricted] = []
+    toolboxes = await get_toolboxes()
+    for toolbox in toolboxes:
+        from_plan_id = None
+        for plan in subscription_plans.subscription_plans:
+            if toolbox.id in plan.available_toolboxes_ids:
+                from_plan_id = plan.id
+                break
+        if from_plan_id is not None:
+            response.append(schemas.ToolboxRestricted(
+                id=toolbox.id,
+                name=toolbox.name,
+                description=toolbox.description,
+                tools=toolbox.tools,
+                type=toolbox.type,
+                from_plan_id=from_plan_id,
+            ))
+    
+    return ToolsResponse(toolboxes=response)
+
 
 class CallToolRequest(BaseModel):
     chat_id: Optional[int] = None
@@ -344,6 +391,7 @@ class CallToolResponse(BaseModel):
     result: schemas.ToolCallMessage
     chat: schemas.Chat
     
+
 @router.post("/tools/call", response_model=CallToolResponse)
 async def call_tool(
     request: CallToolRequest,
@@ -351,7 +399,6 @@ async def call_tool(
     db: Session = Depends(get_session)
 ):
     # Получаем доступные тулбоксы
-    from src.mcp_servers import get_toolboxes
     toolboxes = await get_toolboxes()
     
     # Валидируем наличие тулбокса
@@ -402,7 +449,6 @@ async def call_tool(
         else:
             # если это не дефолтный тулбокс, то вызываем его через MCP
                 # Получаем сервер для выбранного тулбокса
-            from src.mcp_servers import mcp_servers
             server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
             if not server:
                 raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)
@@ -453,6 +499,7 @@ async def call_tool(
         raise exceptions.APIError(code="message_save_failed", message=f"Error saving message: {str(e)}", status_code=500)
 
     return CallToolResponse(result=tool_message, chat=chat)
+
 
 def validate_tool_input(schema, input_data):
     """

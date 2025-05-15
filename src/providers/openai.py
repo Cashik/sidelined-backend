@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 
 from src.providers.base import AIProvider
-from src.config import settings
+from src.config.settings import settings
 from src.services.prompt_service import PromptService
 from src import schemas, enums
 

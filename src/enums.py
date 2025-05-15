@@ -8,12 +8,11 @@ class Role(Enum):
     SYSTEM = "system"
 
 class Service(Enum):
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    GEMINI = "gemini"
-    GROQ = "groq"
-    CLAUDE = "claude"
-    
+    OPENAI = "OpenAI"
+    ANTHROPIC = "Anthropic"
+    GEMINI = "Google Gemini"
+    GROQ = "Groq"
+    CLAUDE = "Claude"
 
 class Model(Enum):
     GPT_4O = "gpt-4o"
@@ -56,4 +55,16 @@ class MessageType(Enum):
 class ToolboxType(Enum):
     DEFAULT = "default"
     MCP = "mcp"
+    
+class ToolboxList(Enum):
+    BASIC = "basic"
+    EVM_KIT = "evm_kit"
 
+class SubscriptionPlanType(Enum):
+    BASIC = "Basic"
+    PRO = "Pro"
+    ULTRA = "Ultra"
+
+
+class PromoCodeType(Enum):
+    PRO_UPGRADE = "pro_upgrade"
