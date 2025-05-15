@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from src import schemas, enums, models, crud, utils, utils_base
+from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
 from src.database import get_session
 from src.config.settings import settings
@@ -51,7 +51,7 @@ async def activate_promo_code(
     code = utils_base.format_promo_code(request.code)
     
     if user.pro_plan_promo_activated:
-        return PromoCodeActivateResponse(message="You already have an endless PRO plan.")
+        raise exceptions.PromoCodeActivationError(message="You already have an endless PRO plan.")
     
     await crud.activate_promo_code(session, user, code)
     
