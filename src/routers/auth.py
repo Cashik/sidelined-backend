@@ -51,9 +51,6 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     )
     token = create_token(token_payload)
     
-    # Обновляем баланс кредитов
-    await crud.refresh_user_credits(db, user, subscription_check)
-    
     # Логируем информацию о пользователе
     logger.info(f"User is logged in: {user.id} ({user.wallet_addresses[0].address})")
     return schemas.LoginResponse(

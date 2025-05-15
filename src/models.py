@@ -23,8 +23,9 @@ class User(Base):
     user_context = Column(String(500), nullable=True)
     chat_settings = Column(postgresql.JSONB, nullable=True, server_default=None)
     
-    credits = Column(Integer, nullable=False, default=0) #!Warning: менять значение только с помощью методов из crud.py
-    credits_last_update = Column(Integer, nullable=False, default=0)
+    # сколько кредитов пользователь использовал сегодня
+    used_credits_today = Column(Integer, nullable=False, default=0)
+    credits_last_update = Column(Integer, nullable=False, default=utils_base.now_timestamp)
     pro_plan_promo_activated = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships

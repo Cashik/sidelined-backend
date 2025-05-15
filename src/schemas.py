@@ -70,7 +70,6 @@ class UserChatSettings(BaseModel):
 
 class User(BaseModel):
     profile: UserProfile
-    credits: int
     chat_settings: UserChatSettings
     connected_wallets: List[WalletAddress]
 

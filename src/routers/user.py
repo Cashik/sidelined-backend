@@ -46,7 +46,6 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
         chat_settings = schemas.MessageGenerationSettings()
     
     return schemas.User(
-        credits=user.credits,
         profile=schemas.UserProfile(
             preferred_name=user.preferred_name, 
             user_context=user.user_context,

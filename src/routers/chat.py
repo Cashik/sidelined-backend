@@ -256,6 +256,9 @@ async def stream_and_collect_messages(
         if delete_old_messages:
             await crud.delete_chat_messages(db, chat_id, user_message.nonce+1)
         await crud.add_chat_messages(db, chat_id, new_messages, user_id)
+        
+        # Запоминаем, что пользователь использовал кредит
+        await crud.change_user_credits(db, user_id, 1)
     except Exception as e:
         logger.error(f"Ошибка сохранения сообщений: {e}", exc_info=True)
 
@@ -288,19 +291,11 @@ async def create_message_stream(
     if create_message_request.model:
         # проверяем, что модель доступна для пользователя
         if create_message_request.model not in available_models:
-            raise exceptions.APIError(code="model_not_available", message="Model not available", status_code=403)
+            raise exceptions.APIError(code="message_generation_failed", message="Model not available for your subscription plan.", status_code=403)
     
-    # Пытаемся списать кредиты
-    # TODO: списывать кредиты после успешного ответа
-    try:
-        # Обновляем баланс кредитов перед началом генерации
-        await crud.refresh_user_credits(db, user, user_subscription_id)
-        await crud.change_user_credits(db, user, -1)
-    except exceptions.BusinessError as e:
-        raise exceptions.APIError(code=e.code, message=e.message, status_code=403)
-    except Exception as e:
-        logger.error(f"Ошибка списания кредитов: {e}", exc_info=True)
-        raise exceptions.APIError(code="credit_deduction_failed", message="Out of credits. Try again later.", status_code=500)
+    # Проверяем, что у пользователь не использовал все кредиты
+    if user.used_credits_today >= user_subscription.max_credits:
+        raise exceptions.APIError(code="message_generation_failed", message="Out of credits. Try again tomorrow.", status_code=403)
     
     # Если это новый чат 
     if create_message_request.chat_id is None:

@@ -463,32 +463,29 @@ async def get_user_messages_to_analyze(user: models.User, session: Session) -> L
     )
     return session.execute(stmt).scalars().all()
 
-async def change_user_credits(db, user: models.User, amount: int):
+async def change_user_credits(db, user_id: int, amount: int):
     """
     Атомарно списывает (или добавляет) кредиты пользователю.
     Если amount < 0 — списание, если > 0 — пополнение.
     """
     result = db.execute(
         update(models.User)
-        .where(models.User.id == user.id)
-        .values(credits=models.User.credits + amount)
+        .where(models.User.id == user_id)
+        .values(used_credits_today=models.User.used_credits_today + amount)
     )
     db.commit()
     if result.rowcount == 0:
-        raise exceptions.BusinessError(code="change_credits_failed", message="Не удалось изменить баланс кредитов (возможно, недостаточно средств)")
+        raise exceptions.BusinessError(code="change_credits_failed", message="Error use credits")
 
-async def refresh_user_credits(db: Session, user: models.User, subscription_id: enums.SubscriptionPlanType):
+async def refresh_user_credits(db: Session, user: models.User):
     """
-    Обновляет баланс кредитов пользователя если прошло больше 24 часов с последнего обновления
+    Сбрасываем использованные кредиты пользователя если прошло больше 24 часов с последнего сброса
     """
-    current_plan: schemas.SubscriptionPlanExtended = subscriptions.get_subscription_plan(subscription_id)
-    current_plan.max_credits
-    
-    if user.credits_last_update is None or user.credits_last_update < utils_base.now_timestamp() - 60*60*24:
+    if user.credits_last_reset is None or user.credits_last_reset < utils_base.now_timestamp() - 60*60*24:
         db.execute(
             update(models.User)
             .where(models.User.id == user.id)
-            .values(credits=current_plan.max_credits, credits_last_update=utils_base.now_timestamp())
+            .values(used_credits_today=0, credits_last_update=utils_base.now_timestamp())
         )
         db.commit()
 
