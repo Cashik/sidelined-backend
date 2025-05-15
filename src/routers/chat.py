@@ -295,7 +295,7 @@ async def create_message_stream(
     
     # Проверяем, что у пользователь не использовал все кредиты
     if user.used_credits_today >= user_subscription.max_credits:
-        raise exceptions.APIError(code="message_generation_failed", message="Out of credits. Try again tomorrow.", status_code=403)
+        raise exceptions.APIError(code="out_of_credits", message="Out of credits. Try again tomorrow.", status_code=403)
     
     # Если это новый чат 
     if create_message_request.chat_id is None:
