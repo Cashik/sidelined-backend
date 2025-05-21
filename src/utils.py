@@ -397,9 +397,8 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
             yield to_sse("message_end", {"id": cur_msg_id, "text": error_message, "generation_time_ms": 0})
         finally:
             yield to_sse("generation_end", {})
-
-        
-        
+    
+   
 async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     """
     Проверка баланса пользователя по списку требований.
@@ -453,3 +452,73 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     
     # не смогли найти ни одного требования, возвращаем базовый доступ юзера
     return user.subscription_plan
+
+from src.services.x_api_service import *
+
+
+async def update_project_data(project: models.Project, from_timestamp: int, db: Session) -> bool:
+    """
+    Обновление данных проекта.
+    
+    Находит новые твиты и парсит их, чтобы отразить в базе данных.
+    
+    from_timestamp - timestamp в секундах, с которого нужно искать твиты. Это либо время создания проекта, либо максимальный срок, который мы учитываем в статистике.
+    
+    """
+    # сервис для работы с x api
+    x_api_service = XApiService()
+    # TODO: подготавливаем query для получения твитов
+    # TODO: нужно сначала брать посты с конца, чтобы можно было определить ситуацию, когда постов слишком много и нужно повторное сканирование с новой даты
+    query = f'{project.name} since:{from_timestamp} tweet_search_mode:"live"'
+    
+    
+    # Получаем твитов сколько сможем
+    response: XApiService.FeedResponse = await x_api_service.search(query, from_timestamp)
+    for tweet in response.tweets:
+
+        main_post_data = tweet.tweet_results.result.legacy
+        views:int = entry.content.itemContent.tweet_results.result.views.count
+        post_id:str = entry.content.itemContent.tweet_results.result.rest_id
+        post_db: models.SocialPost | None = await crud.get_social_post_by_id(post_id, db)
+        
+        if not post_db:
+            source_id = entry.content.itemContent.tweet_results.result.core.user_results.result.rest_id
+            source_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
+            if not source_db:
+                # создаем источник
+                source_data: XApiService.User = entry.content.itemContent.tweet_results.result.core.user_results.result
+                source_db = models.SocialAccount(
+                    social_id=source_id,
+                    name=source_data.legacy.name,
+                    social_login=source_data.legacy.screen_name,
+                )
+                source_db = await crud.create_social_account(source_db, db)
+
+            # создаем пост
+            post_db = models.SocialPost(
+                social_id=post_id,
+                account_id=source_db.id,
+                text=main_post_data.full_text,
+                posted_at=main_post_data.created_at,
+                raw_data=entry
+            )
+            post_db = await crud.create_social_post(post_db, db)
+
+        # создаем связь между постом и проектом, если ее еще не существует
+        await crud.create_or_deny_project_post_mention(project.id, post_db.id, db)
+        
+        # TODO: не сохраняем статистику, если уже добавляли ее только что для другого проекта но того же поста
+        # сохраняем статистику поста
+        post_stats_db = models.SocialPostStatistic(
+            post_id=post_db.id,
+            likes=main_post_data.favorite_count,
+            comments=main_post_data.reply_count,
+            reposts=main_post_data.retweet_count,
+            views=views
+        )
+        await crud.create_social_post_statistic(post_stats_db, db)
+    
+
+    pass
+
+

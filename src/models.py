@@ -122,3 +122,103 @@ class PromoCodeUsage(Base):
     # Relationships
     promo_code = relationship("PromoCode", back_populates="usage")
     user = relationship("User", back_populates="promo_code_usage")
+
+
+# модели для Yapps feed
+
+class Project(Base):
+    __tablename__ = "project"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    
+    keywords = Column(String, nullable=False)
+    
+    # Relationships
+    accounts = relationship("ProjectAccountStatus", back_populates="project")
+    mentions = relationship("ProjectMention", back_populates="project")
+    
+class SocialAccount(Base):
+    __tablename__ = "social_account"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    social_id = Column(String, nullable=False) # id аккаунта в соц. сети
+    social_login = Column(String, nullable=False) # публичный логин аккаунта в соц. сети
+    name = Column(String, nullable=True)
+    
+    # Relationships
+    posts = relationship("SocialPost", back_populates="account")
+    projects = relationship("ProjectAccountStatus", back_populates="account")
+
+class SocialPost(Base):
+    __tablename__ = "social_post"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    social_id = Column(String, nullable=False) # id поста в соц. сети
+    account_id = Column(Integer, ForeignKey("social_account.id"), nullable=False)
+    
+    text = Column(String, nullable=False)
+    posted_at = Column(Integer, nullable=False)
+    
+    raw_data = Column(postgresql.JSONB, nullable=True)
+    
+    # Relationships
+    account = relationship("SocialAccount", back_populates="posts")
+    statistic = relationship("SocialPostStatistic", back_populates="post")
+    mentions = relationship("ProjectMention", back_populates="post")
+
+class SocialPostStatistic(Base):
+    __tablename__ = "social_post_statistic"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    post_id = Column(Integer, ForeignKey("social_post.id"), nullable=False)
+    
+    likes = Column(Integer, nullable=False)
+    comments = Column(Integer, nullable=False)
+    reposts = Column(Integer, nullable=False)
+    views = Column(Integer, nullable=False)
+    
+    # Relationships
+    post = relationship("SocialPost", back_populates="statistic")
+    
+
+class ProjectAccountStatus(Base):
+    #Существование этой связи означает, что аккаунт связан с проектом.
+    __tablename__ = "project_account_status"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    project_id = Column(Integer, ForeignKey("project.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("social_account.id"), nullable=False)
+    
+    type = Column(postgresql.ENUM(enums.ProjectAccountStatusType), nullable=False)
+    
+    # Relationships
+    project = relationship("Project", back_populates="accounts")
+    account = relationship("SocialAccount", back_populates="projects")
+
+
+class ProjectMention(Base):
+    #Существование этой связи означает, что пост ссылается на проект.
+    __tablename__ = "project_mention"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    project_id = Column(Integer, ForeignKey("project.id"), nullable=False)
+    post_id = Column(Integer, ForeignKey("social_post.id"), nullable=False)
+
+    # Relationships
+    project = relationship("Project", back_populates="mentions")
+    post = relationship("SocialPost", back_populates="mentions")

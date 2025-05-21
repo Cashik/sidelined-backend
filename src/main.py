@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from src.config.settings import settings
 from src.database import get_session
 from src.models import *
-from src.routers import auth, chat, user, subscription
+from src.routers import auth, chat, user, subscription, projects
 from src.schemas import APIErrorContent, APIErrorResponse
 from src.exceptions import APIError
 
@@ -65,7 +65,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(user.router)
 app.include_router(subscription.router)
-
+app.include_router(projects.router)
 
 @app.on_event("startup")
 async def startup_event():

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     
     ANKR_API_KEY: str
     
+    X_RAPIDAPI_KEY: str = "abfd9abbd9msh74ba5c6e1e2cc26p13e011jsnc2bfcb7f60b1"
+    X_TWITTER_API_KEY: str = "2WLXZk9kacMXhHxj2cRg19bsuJ98XiQL0ndQ94kMdciuz%7C1574242047661207552-3jI04wPRb0tVkUfFjR4VzJW19ZnQz3"
+    
     @property
     def DATABASE_URL(self) -> str:
         """

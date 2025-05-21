@@ -314,3 +314,16 @@ class ToolboxRestricted(Toolbox):
 class PromoCodeActivateRequest(BaseModel):
     code: str
 
+# схемы для Yapps feed
+
+class Post(BaseModel):
+    id: int
+    text: str
+    created_at: int
+    full_text: str
+    favorite_count: int
+    retweet_count: int
+    reply_count: int
+    views_count: Optional[int] = None
+    lang: str
+

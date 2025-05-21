@@ -68,3 +68,11 @@ class SubscriptionPlanType(Enum):
 
 class PromoCodeType(Enum):
     PRO_UPGRADE = "pro_upgrade"
+
+
+class ProjectAccountStatusType(Enum):
+    MEDIA = "media"
+    FOUNDER = "founder"
+    INVESTOR = "investor"
+    SELECTED = "selected"
+    

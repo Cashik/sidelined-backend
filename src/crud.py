@@ -8,6 +8,7 @@ from src.config.settings import settings
 import src.config.subscription_plans as subscriptions
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -547,4 +548,49 @@ def change_promo_code(session: Session, code: str, valid_until: int):
     promo_code.valid_until = valid_until
     session.add(promo_code)
     session.commit()
+    
+
+async def get_social_post_by_id(post_id: str, db: Session) -> Optional[models.SocialPost]:
+    """
+    Получение поста по его ID в социальной сети
+    """
+    logger.info(f"Attempting to get social post by id: {post_id}")
+    return None
+
+async def get_social_account_by_id(account_id: str, db: Session) -> Optional[models.SocialAccount]:
+    """
+    Получение аккаунта по его ID в социальной сети
+    """
+    logger.info(f"Attempting to get social account by id: {account_id}")
+    return None
+
+async def create_social_account(account: models.SocialAccount, db: Session) -> models.SocialAccount:
+    """
+    Создание нового аккаунта в социальной сети
+    """
+    account.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
+    logger.info(f"Created social account with name: {account.name}")
+    return account
+
+async def create_social_post(post: models.SocialPost, db: Session) -> models.SocialPost:
+    """
+    Создание нового поста в социальной сети
+    """
+    post.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
+    logger.info(f"Created social post with text: {post.text}")
+    return post
+
+async def create_or_deny_project_post_mention(project_id: int, post_id: int, db: Session) -> None:
+    """
+    Создание связи между проектом и постом, если она еще не существует
+    """
+    logger.info(f"Creating project-post mention: project_id={project_id}, post_id={post_id}")
+
+async def create_social_post_statistic(statistic: models.SocialPostStatistic, db: Session) -> models.SocialPostStatistic:
+    """
+    Создание статистики для поста
+    """
+    statistic.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
+    logger.info(f"Created post statistic with stats: {statistic}")
+    return statistic
     
