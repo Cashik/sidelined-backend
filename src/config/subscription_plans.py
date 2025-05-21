@@ -83,6 +83,17 @@ pro_plan_requirements = [
         ),
         balance=1_000
     ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0x23cdabCDD4a246758A9F00F8ce60FF33B5e858C9",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="DATDAO",
+            name="by TRUST"
+        ),
+        balance=100_000
+    ),
 ]
 
 ultra_plan_requirements = [
