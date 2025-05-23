@@ -71,8 +71,10 @@ class PromoCodeType(Enum):
 
 
 class ProjectAccountStatusType(Enum):
-    MEDIA = "media"
+    MEDIA = "official_media"
     FOUNDER = "founder"
-    INVESTOR = "investor"
-    SELECTED = "selected"
     
+
+class SortType(Enum):
+    NEW = "latest"
+    POPULAR = "popular"

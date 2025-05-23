@@ -33,7 +33,8 @@ class User(Base):
     facts = relationship("UserFact", back_populates="user")
     wallet_addresses = relationship("WalletAddress", back_populates="user")
     promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
-    
+    selected_projects = relationship("UserSelectedProject", back_populates="user")
+
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
     )
@@ -133,15 +134,28 @@ class Project(Base):
     created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
     
     name = Column(String, nullable=False)
-    description = Column(String, nullable=False)
-    url = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    url = Column(String, nullable=True)
     
     keywords = Column(String, nullable=False)
     
     # Relationships
     accounts = relationship("ProjectAccountStatus", back_populates="project")
     mentions = relationship("ProjectMention", back_populates="project")
+    user_selected_projects = relationship("UserSelectedProject", back_populates="project")
+
+class UserSelectedProject(Base):
+    __tablename__ = "user_selected_project"
     
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("project.id"), nullable=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="selected_projects")
+    project = relationship("Project", back_populates="user_selected_projects")
+
+
 class SocialAccount(Base):
     __tablename__ = "social_account"
 

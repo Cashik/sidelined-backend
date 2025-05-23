@@ -138,14 +138,14 @@ class XApiService:
         
         until_timestamp = None
         tweets = []
-        
+        logger.info(f"Searching for tweets from {from_timestamp} to {until_timestamp} with query: {query}")
         while True:
             # получаем ленту
             feed_response: GraphQLResponse = await self._get_serch_feed(query, from_timestamp, until_timestamp)
             
             # извлекаем твиты из ответа
             new_tweets, old_tweets_exist = self._extract_actual_tweets_from_feed(feed_response, from_timestamp)
-            
+            logger.info(f"Found {len(new_tweets)} new tweets")
             tweets.extend(new_tweets)
 
             # если хотябы один пост был выкинут или нет новых постов, то можно завершать цикл
@@ -155,6 +155,19 @@ class XApiService:
 
             # снижаем until_timestamp на время самого старого поста
             until_timestamp = min(parse_date_to_timestamp(tweet.legacy.created_at) for tweet in new_tweets)
+            logger.info(f"Until timestamp changed to: {until_timestamp}")
+            
+        
+        logger.info(f"Found {len(tweets)} tweets")
+        
+        # чисто проверка на дубликаты
+        tweets_ids = dict()
+        for tweet in tweets:
+            if tweet.rest_id in tweets_ids:
+                logger.error(f"Duplicate tweet found: {tweet.rest_id}")
+            else:
+                tweets_ids[tweet.rest_id] = tweet
+        
         
         return FeedResponse(tweets=tweets)
         

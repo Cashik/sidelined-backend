@@ -469,24 +469,25 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
     x_api_service = XApiService()
     # TODO: подготавливаем query для получения твитов
     # TODO: нужно сначала брать посты с конца, чтобы можно было определить ситуацию, когда постов слишком много и нужно повторное сканирование с новой даты
-    query = f'{project.name} since:{from_timestamp} tweet_search_mode:"live"'
+    query = f'{project.name} since:{from_timestamp}'
     
     
     # Получаем твитов сколько сможем
     response: XApiService.FeedResponse = await x_api_service.search(query, from_timestamp)
+    
     for tweet in response.tweets:
 
-        main_post_data = tweet.tweet_results.result.legacy
-        views:int = entry.content.itemContent.tweet_results.result.views.count
-        post_id:str = entry.content.itemContent.tweet_results.result.rest_id
+        main_post_data = tweet.legacy
+        views:int = tweet.views.count
+        post_id:str = tweet.rest_id
         post_db: models.SocialPost | None = await crud.get_social_post_by_id(post_id, db)
         
         if not post_db:
-            source_id = entry.content.itemContent.tweet_results.result.core.user_results.result.rest_id
+            source_id = tweet.core.user_results.result.rest_id
             source_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
             if not source_db:
                 # создаем источник
-                source_data: XApiService.User = entry.content.itemContent.tweet_results.result.core.user_results.result
+                source_data: XApiService.User = tweet.core.user_results.result
                 source_db = models.SocialAccount(
                     social_id=source_id,
                     name=source_data.legacy.name,
@@ -500,7 +501,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                 account_id=source_db.id,
                 text=main_post_data.full_text,
                 posted_at=main_post_data.created_at,
-                raw_data=entry
+                raw_data=tweet
             )
             post_db = await crud.create_social_post(post_db, db)
 

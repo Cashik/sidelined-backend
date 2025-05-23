@@ -316,14 +316,40 @@ class PromoCodeActivateRequest(BaseModel):
 
 # схемы для Yapps feed
 
-class Post(BaseModel):
-    id: int
-    text: str
-    created_at: int
-    full_text: str
+class SourceStatusInProject(BaseModel):
+    project_id: int
+    source_type: enums.ProjectAccountStatusType
+
+class PostStats(BaseModel):
     favorite_count: int
     retweet_count: int
     reply_count: int
     views_count: Optional[int] = None
-    lang: str
 
+class Post(BaseModel):
+    text: str
+    created_timestamp: int
+    full_post: str
+    stats: PostStats
+    account_name: str
+    # связь между автором поста и проектом
+    account_projects_statuses: List[SourceStatusInProject]
+
+class FeedSort(BaseModel):
+    type: Optional[enums.SortType] = Field(default=enums.SortType.NEW)
+
+class FeedFilter(BaseModel):
+    projects_ids: Optional[List[int]] = None
+    include_project_sources: Optional[bool] = Field(default=True)
+    include_other_sources: Optional[bool] = Field(default=True)
+
+class GetFeedRequest(BaseModel):
+    filter: Optional[FeedFilter] = Field(default=FeedFilter())
+    sort: Optional[FeedSort] = Field(default=FeedSort())
+
+class GetFeedResponse(BaseModel):
+    posts: List[Post]
+    
+    
+class SelectProjectsRequest(BaseModel):
+    project_ids: List[int]
