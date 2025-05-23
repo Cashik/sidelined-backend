@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
 from sqlalchemy import select, delete, or_, and_, func, desc, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src import models, schemas, enums, exceptions, utils_base
 from src.config.settings import settings
@@ -556,46 +556,62 @@ async def get_social_post_by_id(post_id: str, db: Session) -> Optional[models.So
     """
     Получение поста по его ID в социальной сети
     """
-    logger.info(f"Attempting to get social post by id: {post_id}")
-    return None
+    stmt = select(models.SocialPost).where(models.SocialPost.social_id == post_id)
+    return db.execute(stmt).scalar_one_or_none()
 
 async def get_social_account_by_id(account_id: str, db: Session) -> Optional[models.SocialAccount]:
     """
     Получение аккаунта по его ID в социальной сети
     """
-    logger.info(f"Attempting to get social account by id: {account_id}")
-    return None
+    stmt = select(models.SocialAccount).where(models.SocialAccount.social_id == account_id)
+    return db.execute(stmt).scalar_one_or_none()
 
 async def create_social_account(account: models.SocialAccount, db: Session) -> models.SocialAccount:
     """
     Создание нового аккаунта в социальной сети
     """
-    account.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
-    logger.info(f"Created social account with name: {account.name}")
+    db.add(account)
+    db.commit()
+    db.refresh(account)
     return account
 
 async def create_social_post(post: models.SocialPost, db: Session) -> models.SocialPost:
     """
     Создание нового поста в социальной сети
     """
-    post.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
-    logger.info(f"Created social post with text: {post.text}")
+    db.add(post)
+    db.commit()
+    db.refresh(post)
     return post
 
 async def create_or_deny_project_post_mention(project_id: int, post_id: int, db: Session) -> None:
     """
     Создание связи между проектом и постом, если она еще не существует
     """
-    logger.info(f"Creating project-post mention: project_id={project_id}, post_id={post_id}")
+    # Проверяем, существует ли уже такая связь
+    stmt = select(models.ProjectMention).where(
+        models.ProjectMention.project_id == project_id,
+        models.ProjectMention.post_id == post_id
+    )
+    existing_mention = db.execute(stmt).scalar_one_or_none()
+    
+    if not existing_mention:
+        # Создаем новую связь
+        mention = models.ProjectMention(
+            project_id=project_id,
+            post_id=post_id
+        )
+        db.add(mention)
+        db.commit()
 
 async def create_social_post_statistic(statistic: models.SocialPostStatistic, db: Session) -> models.SocialPostStatistic:
     """
     Создание статистики для поста
     """
-    statistic.id = int(time.time() * 1000) % 1000000  # Генерируем случайный ID
-    logger.info(f"Created post statistic with stats: {statistic}")
+    db.add(statistic)
+    db.commit()
+    db.refresh(statistic)
     return statistic
-    
 
 async def get_posts(filter: schemas.FeedFilter, db: Session) -> List[models.SocialPost]:
     """
@@ -619,7 +635,10 @@ async def get_posts(filter: schemas.FeedFilter, db: Session) -> List[models.Soci
     day_ago = utils_base.now_timestamp() - 60*60*24
     
     # Базовый запрос для получения постов
-    query = select(models.SocialPost).where(
+    query = select(models.SocialPost).options(
+        joinedload(models.SocialPost.statistic),
+        joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects)
+    ).where(
         models.SocialPost.posted_at >= day_ago
     )
     
@@ -633,23 +652,6 @@ async def get_posts(filter: schemas.FeedFilter, db: Session) -> List[models.Soci
     query = query.outerjoin(
         models.ProjectAccountStatus,
         models.SocialPost.account_id == models.ProjectAccountStatus.account_id
-    )
-    
-    # Добавляем JOIN с последней статистикой поста
-    latest_stats = select(
-        models.SocialPostStatistic.post_id,
-        func.max(models.SocialPostStatistic.created_at).label('max_created_at')
-    ).group_by(models.SocialPostStatistic.post_id).subquery()
-    
-    query = query.outerjoin(
-        latest_stats,
-        models.SocialPost.id == latest_stats.c.post_id
-    ).outerjoin(
-        models.SocialPostStatistic,
-        and_(
-            models.SocialPost.id == models.SocialPostStatistic.post_id,
-            models.SocialPostStatistic.created_at == latest_stats.c.max_created_at
-        )
     )
     
     # Формируем условия фильтрации
@@ -671,11 +673,10 @@ async def get_posts(filter: schemas.FeedFilter, db: Session) -> List[models.Soci
         query = query.where(or_(*conditions))
     
     # Сортируем по дате публикации
-    # TODO: возможно убрать, тк нужно учитывать тип сортировки еще и в роутере
     query = query.order_by(desc(models.SocialPost.posted_at))
     
     # Выполняем запрос
-    result = db.execute(query).scalars().all()
+    result = db.execute(query).unique().scalars().all()
     
     return result
     

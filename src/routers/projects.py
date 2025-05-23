@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
@@ -82,13 +82,19 @@ async def select_projects(request: schemas.SelectProjectsRequest, user: models.U
 
 
 @router.get("/feed", response_model=schemas.GetFeedResponse)
-async def get_feed(request: schemas.GetFeedRequest, db: Session = Depends(get_session)):
+async def get_feed(
+    projects_ids: Optional[List[int]] = Query(None, description="List of project IDs to filter by"),
+    include_project_sources: bool = True,
+    include_other_sources: bool = True,
+    sort_type: enums.SortType = enums.SortType.NEW,
+    db: Session = Depends(get_session)
+):
     """
     Эндпоинт для получения ленты постов по фильтру с сортировкой и (todo:пагинацией).
     
     Фильтры:
     - projects_ids: List[int] - список id проектов, если не указан, то учитываются все проекты
-    - project_source_statuses: Enums.ProjectSourceStatus - список типов источников, если не указан, то возвращаются все источники
+    - include_project_sources: bool - включать ли посты от источников, связанных с проектами
     - include_other_sources: bool - включать ли посты от источников, которые не относятся к проектам
 
     Сортировка:
@@ -97,10 +103,18 @@ async def get_feed(request: schemas.GetFeedRequest, db: Session = Depends(get_se
     TODO:Пагинация:
     - page: int - номер страницы
     - page_size: int - количество постов на странице
-    
     """
-    posts: List[models.SocialPost] = await crud.get_posts(request.filter, db)
+    filter = schemas.FeedFilter(
+        projects_ids=projects_ids,
+        include_project_sources=include_project_sources,
+        include_other_sources=include_other_sources
+    )
     
+    sort = schemas.FeedSort(type=sort_type)
+    
+    posts: List[models.SocialPost] = await crud.get_posts(filter, db)
+    
+    logger.info(f"Found {len(posts)} posts")
     # сортируем посты по выбранному типу сортировки
     def score_post(post: models.SocialPost) -> float:
         # (views *1 + likes *0.5 + retweets*2)
@@ -111,14 +125,48 @@ async def get_feed(request: schemas.GetFeedRequest, db: Session = Depends(get_se
             logger.error(f"No statistics for post {post.id}")
             return 0
     
-    if request.sort.type == enums.SortType.POPULAR:
+    if sort.type == enums.SortType.POPULAR:
         posts.sort(key=score_post, reverse=True)
-    elif request.sort.type == enums.SortType.NEW:
+    elif sort.type == enums.SortType.NEW:
         posts.sort(key=lambda x: x.posted_at, reverse=True)
     else:
         raise Exception("Invalid sort type")
     
-    response = schemas.GetFeedResponse(posts=posts)
+    # Преобразуем модели в схемы
+    posts_schemas = []
+    for post in posts:
+        try:
+            # Получаем статистику поста
+            stats = post.statistic[0] if post.statistic else None
+            
+            # Получаем статусы аккаунта в проектах
+            account_projects_statuses = []
+            for project_status in post.account.projects:
+                account_projects_statuses.append(schemas.SourceStatusInProject(
+                    project_id=project_status.project_id,
+                    source_type=project_status.type
+                ))
+            
+            # Создаем схему поста
+            post_schema = schemas.Post(
+                text=post.text,
+                created_timestamp=post.posted_at,
+                full_post_json=post.raw_data,  # В данном случае полный текст совпадает с обычным
+                stats=schemas.PostStats(
+                    favorite_count=stats.likes if stats else 0,
+                    retweet_count=stats.reposts if stats else 0,
+                    reply_count=stats.comments if stats else 0,
+                    views_count=stats.views if stats else 0
+                ),
+                account_name=post.account.name,
+                account_projects_statuses=account_projects_statuses
+            )
+            posts_schemas.append(post_schema)
+        except Exception as e:
+            logger.error(f"Error converting post {post.id} to schema: {str(e)}")
+            continue
+    
+    response = schemas.GetFeedResponse(posts=posts_schemas)
     return response
 
 

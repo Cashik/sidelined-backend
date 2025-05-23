@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from src.database import SessionLocal
 from src.models import User, Project
-from src import crud, utils_base, enums, models
+from src import crud, utils_base, enums, models, utils
 from src.config.projects import projects_all
 import logging
 
@@ -114,6 +114,28 @@ def sync_projects():
         session.close()
 
 
+async def sync_posts_async():
+    """
+    Синхронизация постов из соц. сетей по всем проектам за последние 3 дня.
+    """
+    session = SessionLocal()
+    try:
+        # Получаем все проекты из базы данных
+        projects = session.execute(select(models.Project)).scalars().all()
+        from_timestamp = utils_base.now_timestamp() - 3 * 24 * 60 * 60
+        # Для каждого проекта запускаем синхронизацию постов
+        for project in projects:
+            await utils.update_project_data(project, from_timestamp, session)
+    finally:
+        session.close()
+
+def sync_posts():
+    """
+    Синхронизация постов из соц. сетей по всем проектам за последние 3 дня.
+    """
+    asyncio.run(sync_posts_async())
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -132,9 +154,11 @@ def main():
     change_parser.add_argument('--code', '-c', required=True, help='Код промо-кода')
     change_parser.add_argument('--valid-until', '-v', required=True, help='Время окончания действия промо-кода')
 
-
     # Команда синхронизации проектов
     sync_parser = subparsers.add_parser('sync-projects', help='Синхронизировать проекты')
+
+    # Команда синхронизации постов
+    sync_posts_parser = subparsers.add_parser('sync-posts', help='Синхронизировать посты')
 
     args = parser.parse_args()
 
@@ -146,6 +170,8 @@ def main():
         change_promo_code(args.code, args.valid_until)
     elif args.command == 'sync-projects':
         sync_projects()
+    elif args.command == 'sync-posts':
+        sync_posts()
     else:
         parser.print_help()
 

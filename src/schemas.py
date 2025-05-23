@@ -329,7 +329,7 @@ class PostStats(BaseModel):
 class Post(BaseModel):
     text: str
     created_timestamp: int
-    full_post: str
+    full_post_json: Dict[str, Any]
     stats: PostStats
     account_name: str
     # связь между автором поста и проектом

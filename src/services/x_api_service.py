@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import aiohttp
 from pydantic import BaseModel, Field
 import logging
+import json
 
 from src.config.settings import settings
 from src.utils_base import parse_date_to_timestamp, timestamp_to_X_date
@@ -200,17 +201,34 @@ class XApiService:
                 ) as response:
                     response.raise_for_status()
                     response_json = await response.json()
+                    logger.debug(f"Raw API response: {response_json}")
             except aiohttp.ClientError as e:
                 raise Exception(f"Error making request to X API: {str(e)}")
             
-        if response_json.get("data", {}):
-            response_json = response_json.get("data", {})
+        if not response_json:
+            raise Exception("Empty response from API")
+            
+        if isinstance(response_json, str):
+            try:
+                response_json = json.loads(response_json)
+            except json.JSONDecodeError as e:
+                raise Exception(f"Failed to parse API response as JSON: {str(e)}")
+            
+        if not isinstance(response_json, dict):
+            raise Exception(f"Unexpected response format: {type(response_json)}")
+            
+        if "data" in response_json:
+            response_json = response_json["data"]
         else:
-            raise Exception("No data in response")
+            raise Exception("No data field in response")
         
-        data = GraphQLResponse(**response_json)
-        
-        return data
+        try:
+            data = GraphQLResponse(**response_json)
+            return data
+        except Exception as e:
+            logger.error(f"Failed to parse response as GraphQLResponse: {str(e)}")
+            logger.error(f"Response data: {response_json}")
+            raise Exception(f"Failed to parse API response: {str(e)}")
     
     
     def _extract_actual_tweets_from_feed(self, feed_response: GraphQLResponse, from_timestamp: int) -> Tuple[List[TweetResult], bool]:
@@ -220,22 +238,38 @@ class XApiService:
         tweets = []
         old_tweets_exist = False
         
-        entries: List[Entry] = feed_response.data.search_by_raw_query.search_timeline.timeline.instructions[0].entries
+        try:
+            entries: List[Entry] = feed_response.data.search_by_raw_query.search_timeline.timeline.instructions[0].entries
+        except (AttributeError, IndexError) as e:
+            logger.error(f"Error accessing entries in feed response: {e}")
+            logger.error(f"Feed response structure: {feed_response}")
+            return [], False
+        
         for entry in entries:
-            if entry.content.itemContent is None:
-                logger.error(f"Entry {entry.entryId} has no itemContent")
-                continue
-            
             try:
+                if entry.content.itemContent is None:
+                    logger.warning(f"Entry {entry.entryId} has no itemContent")
+                    continue
+                
+                if not hasattr(entry.content.itemContent, 'tweet_results') or entry.content.itemContent.tweet_results is None:
+                    logger.warning(f"Entry {entry.entryId} has no tweet_results")
+                    continue
+                
+                if not hasattr(entry.content.itemContent.tweet_results, 'result') or entry.content.itemContent.tweet_results.result is None:
+                    logger.warning(f"Entry {entry.entryId} has no result in tweet_results")
+                    continue
+                
                 tweet_result: TweetResult = entry.content.itemContent.tweet_results.result
+                
+                if parse_date_to_timestamp(tweet_result.legacy.created_at) < from_timestamp:
+                    old_tweets_exist = True
+                    continue
+                else:
+                    tweets.append(tweet_result)
+                    
             except Exception as e:
-                logger.error(f"Error parsing tweet result: {e} \n For entry: {entry}")
+                logger.error(f"Error processing entry {entry.entryId}: {e}")
+                logger.error(f"Entry data: {entry}")
                 continue
-            
-            if parse_date_to_timestamp(tweet_result.legacy.created_at) < from_timestamp:
-                old_tweets_exist = True
-                continue
-            else:
-                tweets.append(tweet_result)
             
         return tweets, old_tweets_exist
