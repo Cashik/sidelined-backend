@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 import aiohttp
 from pydantic import BaseModel, Field
 import logging
@@ -58,8 +58,19 @@ class TweetResult(BaseModel):
     views: Optional[TweetViews] = None
 
 
+class UnknownTweetResult(BaseModel):
+    """Заглушка для твитов без обязательных полей (rest_id / core / legacy)."""
+
+    limitedActionResults: Optional[dict] = None
+
+    # Разрешаем произвольные дополнительные поля, т.к. структура может отличаться.
+    model_config = {"extra": "allow"}
+
+
 class TweetResults(BaseModel):
-    result: TweetResult
+    """Результат твита может быть валидным (TweetResult) или «урезанным» (UnknownTweetResult)."""
+
+    result: Union[TweetResult, UnknownTweetResult]
 
 
 class ItemContent(BaseModel):
@@ -217,10 +228,10 @@ class XApiService:
         if not isinstance(response_json, dict):
             raise Exception(f"Unexpected response format: {type(response_json)}")
             
-        if "data" in response_json:
+        if "data" in response_json and isinstance(response_json["data"], dict):
             response_json = response_json["data"]
         else:
-            raise Exception("No data field in response")
+            raise Exception(f"Unexpected data payload: {response_json}")
         
         try:
             data = GraphQLResponse(**response_json)
@@ -259,13 +270,21 @@ class XApiService:
                     logger.warning(f"Entry {entry.entryId} has no result in tweet_results")
                     continue
                 
-                tweet_result: TweetResult = entry.content.itemContent.tweet_results.result
-                
+                tweet_raw = entry.content.itemContent.tweet_results.result
+
+                # Нас интересуют только полноценные твиты, которые прошли валидацию TweetResult.
+                if not isinstance(tweet_raw, TweetResult):
+                    logger.debug(f"Entry {entry.entryId} contains non-tweet object ({type(tweet_raw).__name__}), skipping")
+                    continue
+
+                tweet_result: TweetResult = tweet_raw
+
+                # Фильтруем по дате – пропускаем «старые» твиты
                 if parse_date_to_timestamp(tweet_result.legacy.created_at) < from_timestamp:
                     old_tweets_exist = True
                     continue
-                else:
-                    tweets.append(tweet_result)
+
+                tweets.append(tweet_result)
                     
             except Exception as e:
                 logger.error(f"Error processing entry {entry.entryId}: {e}")

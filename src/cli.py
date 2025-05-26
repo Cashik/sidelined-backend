@@ -181,6 +181,7 @@ python -m src.cli delete-all-users --force
 python -m src.cli create-promo-code --code "PROMO_CODE" --valid-until "VALID_UNTIL"
 python -m src.cli change-promo-code --code "PROMO_CODE" --valid-until "VALID_UNTIL"
 python -m src.cli sync-projects
+python -m src.cli sync-posts
 """
 
 if __name__ == "__main__":

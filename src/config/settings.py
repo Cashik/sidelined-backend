@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DB_PORT: str = "5432"
     DB_NAME: str = "2eden"
     
+    # Redis settings
+    REDIS_HOST: str = "sidelined_redis"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
+    
     # App settings
     SECRET_KEY: str = "your-secret-key"
     DEBUG: bool = True
@@ -56,8 +61,8 @@ class Settings(BaseSettings):
     
     ANKR_API_KEY: str
     
-    X_RAPIDAPI_KEY: str = "abfd9abbd9msh74ba5c6e1e2cc26p13e011jsnc2bfcb7f60b1"
-    X_TWITTER_API_KEY: str = "2WLXZk9kacMXhHxj2cRg19bsuJ98XiQL0ndQ94kMdciuz%7C1574242047661207552-3jI04wPRb0tVkUfFjR4VzJW19ZnQz3"
+    X_RAPIDAPI_KEY: str
+    X_TWITTER_API_KEY: str
     
     @property
     def DATABASE_URL(self) -> str:
