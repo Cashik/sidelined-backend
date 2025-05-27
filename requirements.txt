@@ -26,3 +26,7 @@ smithery
 jsonschema
 web3
 celery[redis]>=5.3
+python-multipart
+bcrypt
+itsdangerous>=2.1.0
+starlette-admin[sqlalchemy]

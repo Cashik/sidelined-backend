@@ -18,6 +18,7 @@ from sqlalchemy import text
 from fastapi.exceptions import RequestValidationError
 from src.exceptions import BusinessError
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.config.settings import settings
 from src.database import get_session
@@ -25,6 +26,7 @@ from src.models import *
 from src.routers import auth, chat, user, subscription, projects
 from src.schemas import APIErrorContent, APIErrorResponse
 from src.exceptions import APIError
+from src.admin_starlette import setup_admin
 
 app = FastAPI(
     title="Sidelined API - Swagger UI",
@@ -60,12 +62,17 @@ app.add_middleware(
     expose_headers=["X-New-Token"],
 )
 
+app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
+
 # Подключаем роутеры
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(user.router)
 app.include_router(subscription.router)
 app.include_router(projects.router)
+
+# Инициализация SQLAdmin
+setup_admin(app)
 
 @app.on_event("startup")
 async def startup_event():

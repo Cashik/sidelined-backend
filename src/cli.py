@@ -3,10 +3,11 @@ import argparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from src.database import SessionLocal
-from src.models import User, Project
+from src.models import User, Project, AdminUser
 from src import crud, utils_base, enums, models, utils
 from src.config.projects import projects_all
 import logging
+import bcrypt
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ def sync_projects():
                     name=project.name,
                     description=project.description,
                     url=project.url,
-                    keywords=project.keywords,
+                    keywords=(";".join(project.keywords) if isinstance(project.keywords, (list, tuple)) else project.keywords),
                 )
                 project_db = crud.create_or_update_project_by_name(session, project_db)
                 logger.info(f"Проект {project.name} успешно синхронизирован")
@@ -136,6 +137,54 @@ def sync_posts():
     asyncio.run(sync_posts_async())
 
 
+def create_admin_user(login: str, password: str, role: str):
+    """Создать администратора или модератора"""
+    role_upper = role.upper()
+    if role_upper not in enums.AdminRole._value2member_map_:
+        print(f"Недопустимая роль. Возможные значения: {', '.join([r.name.lower() for r in enums.AdminRole])}")
+        return
+    session = SessionLocal()
+    try:
+        # проверяем, что логин уникален
+        existing = session.execute(select(AdminUser).where(AdminUser.login == login)).scalar_one_or_none()
+        if existing:
+            print(f"Пользователь с логином {login} уже существует")
+            return
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        admin = AdminUser(
+            login=login,
+            password_hash=password_hash,
+            role=enums.AdminRole(role_upper)
+        )
+        session.add(admin)
+        session.commit()
+        print(f"Администратор {login} успешно создан с ролью {role}")
+    except Exception as e:
+        session.rollback()
+        print(f"Ошибка при создании администратора: {str(e)}")
+    finally:
+        session.close()
+
+
+def delete_all_admin_users(force: bool = False):
+    """Удалить всех администраторов (экстренная команда)"""
+    if not force:
+        confirm = input("Вы уверены, что хотите удалить ВСЕХ администраторов? Это действие нельзя отменить. (y/n): ")
+        if confirm.lower() != 'y':
+            print("Операция отменена")
+            return
+    session = SessionLocal()
+    try:
+        deleted = session.query(AdminUser).delete()
+        session.commit()
+        print(f"Удалено администраторов: {deleted}")
+    except Exception as e:
+        session.rollback()
+        print(f"Ошибка при удалении администраторов: {str(e)}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -160,6 +209,16 @@ def main():
     # Команда синхронизации постов
     sync_posts_parser = subparsers.add_parser('sync-posts', help='Синхронизировать посты')
 
+    # Команда создания админа/модератора
+    create_admin_parser = subparsers.add_parser('create-admin', help='Создать администратора/модератора')
+    create_admin_parser.add_argument('--login', '-l', required=True, help='Логин')
+    create_admin_parser.add_argument('--password', '-p', required=True, help='Пароль')
+    create_admin_parser.add_argument('--role', '-r', required=False, default='admin', help='Роль (admin|moderator)')
+
+    # Команда удаления всех админов
+    delete_admins_parser = subparsers.add_parser('delete-all-admins', help='Удалить всех администраторов')
+    delete_admins_parser.add_argument('--force', '-f', action='store_true', help='Пропустить подтверждение')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -172,6 +231,10 @@ def main():
         sync_projects()
     elif args.command == 'sync-posts':
         sync_posts()
+    elif args.command == 'create-admin':
+        create_admin_user(args.login, args.password, args.role)
+    elif args.command == 'delete-all-admins':
+        delete_all_admin_users(args.force)
     else:
         parser.print_help()
 
@@ -182,6 +245,7 @@ python -m src.cli create-promo-code --code "PROMO_CODE" --valid-until "VALID_UNT
 python -m src.cli change-promo-code --code "PROMO_CODE" --valid-until "VALID_UNTIL"
 python -m src.cli sync-projects
 python -m src.cli sync-posts
+python -m src.cli create-admin --login "LOGIN" --password "PASSWORD" --role "ROLE"
 """
 
 if __name__ == "__main__":

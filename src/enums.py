@@ -1,4 +1,3 @@
-
 from enum import Enum
 
 
@@ -78,3 +77,7 @@ class ProjectAccountStatusType(Enum):
 class SortType(Enum):
     NEW = "latest"
     POPULAR = "popular"
+
+class AdminRole(Enum):
+    ADMIN = "ADMIN"
+    MODERATOR = "MODERATOR"

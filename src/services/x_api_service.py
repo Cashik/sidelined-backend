@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Any, List, Optional, Tuple, Union
+import uuid
 import aiohttp
 from pydantic import BaseModel, Field
 import logging
@@ -123,6 +124,53 @@ class GraphQLResponse(BaseModel):
 
 class FeedResponse(BaseModel):
     tweets: List[TweetResult]
+
+
+class UserProfileLegacy(BaseModel):
+    """Расширенная информация о пользователе из API"""
+    screen_name: str
+    name: str
+    followers_count: int
+    friends_count: int
+    statuses_count: int
+    profile_image_url_https: str
+    created_at: str
+    description: Optional[str] = None
+    location: Optional[str] = None
+    url: Optional[str] = None
+    verified: bool = False
+
+
+class UserProfileResult(BaseModel):
+    """Результат пользователя из API"""
+    rest_id: str
+    legacy: UserProfileLegacy
+    typename: str = Field(default="User", alias="__typename")
+
+    model_config = {"populate_by_name": True, "extra": "allow"}
+
+
+class UserProfileWrapper(BaseModel):
+    """Обёртка для результата пользователя"""
+    result: UserProfileResult
+
+
+class UserProfileData(BaseModel):
+    """Данные пользователя верхнего уровня"""
+    user: UserProfileWrapper
+
+
+class UserProfileDataWrapper(BaseModel):
+    """Обёртка для данных пользователя"""
+    data: UserProfileData
+
+
+class UserProfileResponse(BaseModel):
+    """Полный ответ API для профиля пользователя"""
+    code: int
+    data: UserProfileDataWrapper
+    result: Optional[Any] = None
+    msg: str
 
 
 class XApiService:
@@ -292,3 +340,99 @@ class XApiService:
                 continue
             
         return tweets, old_tweets_exist
+    
+    
+    async def get_user_social_id(self, user_login: str) -> str:
+        """
+        Получение social_id пользователя по его логину
+        
+        Args:
+            user_login: Логин пользователя в X (Twitter)
+            
+        Returns:
+            str: rest_id пользователя
+            
+        Raises:
+            Exception: Если не удалось получить или извлечь rest_id
+        """
+        headers = {
+            'x-rapidapi-key': self.api_key,
+            'x-rapidapi-host': self.API_HOST
+        }
+        
+        params = {
+            'screenName': user_login,
+            'resFormat': 'json',
+            'apiKey': settings.X_TWITTER_API_KEY
+        }
+
+        response_json = None
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"https://{self.base_url}/base/apitools/userByScreenNameV2",
+                    headers=headers,
+                    params=params
+                ) as response:
+                    response.raise_for_status()
+                    response_json = await response.json()
+                    logger.debug(f"User API response: {response_json}")
+            except aiohttp.ClientError as e:
+                raise Exception(f"Error making request to X API for user {user_login}: {str(e)}")
+            
+        if not response_json:
+            raise Exception(f"Empty response from API for user {user_login}")
+            
+        if isinstance(response_json, str):
+            try:
+                response_json = json.loads(response_json)
+            except json.JSONDecodeError as e:
+                raise Exception(f"Failed to parse API response as JSON for user {user_login}: {str(e)}")
+            
+        if not isinstance(response_json, dict):
+            raise Exception(f"Unexpected response format for user {user_login}: {type(response_json)}")
+        
+        # Пытаемся извлечь rest_id из разных возможных путей
+        rest_id = None
+        
+        try:
+            # Основной путь: data.data.user.result.rest_id
+            if "data" in response_json and "data" in response_json["data"] and "user" in response_json["data"]["data"]:
+                user_data = response_json["data"]["data"]["user"]
+                if "result" in user_data and "rest_id" in user_data["result"]:
+                    rest_id = user_data["result"]["rest_id"]
+                    logger.info(f"Found rest_id for user {user_login}: {rest_id}")
+                    return rest_id
+        except (KeyError, TypeError) as e:
+            logger.debug(f"Primary path failed for user {user_login}: {e}")
+        
+        # Альтернативные пути для rest_id
+        alternative_paths = [
+            ["data", "user", "result", "rest_id"],
+            ["user", "result", "rest_id"],
+            ["result", "rest_id"],
+            ["rest_id"]
+        ]
+        
+        for path in alternative_paths:
+            try:
+                current = response_json
+                for key in path:
+                    current = current[key]
+                if current:
+                    rest_id = str(current)
+                    logger.info(f"Found rest_id for user {user_login} via alternative path {path}: {rest_id}")
+                    return rest_id
+            except (KeyError, TypeError):
+                continue
+        
+        # Если не удалось найти rest_id, выбрасываем ошибку с подробной информацией
+        logger.error(f"Failed to extract rest_id for user {user_login}")
+        logger.error(f"Response structure: {json.dumps(response_json, indent=2)}")
+        raise Exception(
+            f"Could not extract rest_id for user '{user_login}'. "
+            f"Response structure does not match expected format. "
+            f"Available keys at root level: {list(response_json.keys()) if isinstance(response_json, dict) else 'Not a dict'}"
+        )
+    
+    

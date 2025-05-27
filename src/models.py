@@ -39,6 +39,14 @@ class User(Base):
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
     )
     
+    def __str__(self) -> str:
+        if self.preferred_name:
+            return f"User #{self.id} ({self.preferred_name})"
+        return f"User #{self.id}"
+    
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, preferred_name='{self.preferred_name}')>"
+    
     @property
     def subscription_plan(self) -> enums.SubscriptionPlanType:
         if self.pro_plan_promo_activated:
@@ -140,9 +148,25 @@ class Project(Base):
     keywords = Column(String, nullable=False)
     
     # Relationships
-    accounts = relationship("ProjectAccountStatus", back_populates="project")
-    mentions = relationship("ProjectMention", back_populates="project")
-    user_selected_projects = relationship("UserSelectedProject", back_populates="project")
+    accounts = relationship("ProjectAccountStatus", back_populates="project", cascade="all, delete-orphan")
+    mentions = relationship("ProjectMention", back_populates="project", cascade="all, delete-orphan")
+    user_selected_projects = relationship("UserSelectedProject", back_populates="project", cascade="all, delete-orphan")
+    
+    def __str__(self) -> str:
+        return f"{self.name}"
+    
+    def __repr__(self) -> str:
+        return f"<Project(id={self.id}, name='{self.name}')>"
+    
+    def __admin_repr__(self, request) -> str:
+        """Display representation in admin"""
+        return self.name
+    
+    def __admin_select2_repr__(self, request) -> str:
+        """Display representation in select2 dropdowns"""
+        return f'<span><strong>{self.name}</strong></span>'
+    
+
 
 class UserSelectedProject(Base):
     __tablename__ = "user_selected_project"
@@ -169,6 +193,28 @@ class SocialAccount(Base):
     # Relationships
     posts = relationship("SocialPost", back_populates="account")
     projects = relationship("ProjectAccountStatus", back_populates="account")
+    
+    def __str__(self) -> str:
+        if self.name:
+            return f"{self.social_login} ({self.name})"
+        return f"{self.social_login}"
+    
+    def __repr__(self) -> str:
+        return f"<SocialAccount(id={self.id}, social_login='{self.social_login}')>"
+    
+    def __admin_repr__(self, request) -> str:
+        """Display representation in admin"""
+        if self.name:
+            return f"{self.social_login} ({self.name})"
+        return self.social_login
+    
+    def __admin_select2_repr__(self, request) -> str:
+        """Display representation in select2 dropdowns"""
+        if self.name:
+            return f'<span><strong>{self.social_login}</strong> <small>({self.name})</small></span>'
+        return f'<span><strong>{self.social_login}</strong></span>'
+    
+
 
 class SocialPost(Base):
     __tablename__ = "social_post"
@@ -221,6 +267,39 @@ class ProjectAccountStatus(Base):
     # Relationships
     project = relationship("Project", back_populates="accounts")
     account = relationship("SocialAccount", back_populates="projects")
+    
+    def __str__(self) -> str:
+        try:
+            # Попытка получить имена через relationships
+            project_name = self.project.name if self.project else f"Project#{self.project_id}"
+            account_login = self.account.social_login if self.account else f"Account#{self.account_id}"
+            return f"{project_name} ↔ {account_login} ({self.type.value})"
+        except Exception:
+            # Fallback на простое отображение без relationships
+            return f"Project#{self.project_id} ↔ Account#{self.account_id} ({self.type.value})"
+    
+    def __repr__(self) -> str:
+        return f"<ProjectAccountStatus(id={self.id}, project_id={self.project_id}, account_id={self.account_id}, type={self.type})>"
+    
+    def __admin_repr__(self, request) -> str:
+        """Display representation in admin"""
+        try:
+            # Попытка получить имена через relationships
+            project_name = self.project.name if self.project else f"Project#{self.project_id}"
+            account_login = self.account.social_login if self.account else f"Account#{self.account_id}"
+            return f"{project_name} ↔ {account_login} ({self.type.value})"
+        except Exception:
+            # Fallback на простое отображение без relationships
+            return f"Project#{self.project_id} ↔ Account#{self.account_id} ({self.type.value})"
+    
+    def __admin_select2_repr__(self, request) -> str:
+        """Display representation in select2 dropdowns"""
+        try:
+            project_name = self.project.name if self.project else f"Project#{self.project_id}"
+            account_login = self.account.social_login if self.account else f"Account#{self.account_id}"
+            return f'<span><strong>{project_name}</strong> ↔ <strong>{account_login}</strong> <small>({self.type.value})</small></span>'
+        except Exception:
+            return f'<span>Project#{self.project_id} ↔ Account#{self.account_id} <small>({self.type.value})</small></span>'
 
 
 class ProjectMention(Base):
@@ -236,3 +315,31 @@ class ProjectMention(Base):
     # Relationships
     project = relationship("Project", back_populates="mentions")
     post = relationship("SocialPost", back_populates="mentions")
+
+class AdminUser(Base):
+    """Администратор/модератор системы"""
+    __tablename__ = "admin_user"
+
+    id = Column(Integer, primary_key=True, index=True)
+    login = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(128), nullable=False)
+    role = Column(postgresql.ENUM(enums.AdminRole, name="admin_role"), nullable=False, server_default=enums.AdminRole.ADMIN.value)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    last_login_at = Column(Integer, nullable=True)
+
+    def verify_password(self, password: str) -> bool:
+        """Проверка пароля при помощи bcrypt"""
+        try:
+            import bcrypt  # локальный импорт, чтобы не требовать bcrypt, если метод не вызывают
+            return bcrypt.checkpw(password.encode(), self.password_hash.encode())
+        except Exception:
+            return False
+    
+    def __str__(self) -> str:
+        return f"{self.login} ({self.role.value})"
+    
+    def __repr__(self) -> str:
+        return f"<AdminUser(id={self.id}, login='{self.login}', role={self.role})>"
+    
+    def __admin_repr__(self, request) -> str:
+        return f"{self.login} ({self.role.value})"
