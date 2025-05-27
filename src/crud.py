@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
-from sqlalchemy import select, delete, or_, and_, func, desc, update
+from sqlalchemy import select, delete, and_, or_, func, desc, update, literal
 from sqlalchemy.orm import Session, joinedload
 
 from src import models, schemas, enums, exceptions, utils_base
@@ -613,74 +613,104 @@ async def create_social_post_statistic(statistic: models.SocialPostStatistic, db
     db.refresh(statistic)
     return statistic
 
-async def get_posts(filter: schemas.FeedFilter, db: Session) -> List[models.SocialPost]:
+async def get_posts(
+    filter: schemas.FeedFilter,
+    sort_type: enums.SortType,
+    db: Session,
+    limit: int = 100,
+) -> List[models.SocialPost]:
     """
-    Получение списка постов по фильтру
-    
-    Args:
-        filter: Фильтр для постов
-            - projects_ids: список id проектов, если не указан, то учитываются все проекты
-            - include_project_sources: если True, возвращает посты от аккаунтов, связанных с проектами
-            - include_other_sources: если True, возвращает посты от аккаунтов, не связанных с проектами
-        db: Сессия базы данных
-        
-    Returns:
-        List[models.SocialPost]: Список отфильтрованных постов с их последней статистикой
+    Возвращает отфильтрованную и отсортированную ленту постов.
+
+    Параметры
+    ---------
+    filter : schemas.FeedFilter
+        Условия выборки.
+    sort_type : enums.SortType
+        Тип сортировки (NEW | POPULAR).
+    db : Session
+        SQLAlchemy-сессия.
+    limit : int
+        Максимальное число постов (по ТЗ = 100).
     """
-    # Если оба флага False, возвращаем пустой список
+
+    # Если оба флага выключены – нечего отдавать
     if not filter.include_project_sources and not filter.include_other_sources:
         return []
-    
-    # Получаем timestamp для 24 часов назад
-    day_ago = utils_base.now_timestamp() - 60*60*24
-    
-    # Базовый запрос для получения постов
-    query = select(models.SocialPost).options(
-        joinedload(models.SocialPost.statistic),
-        joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects)
-    ).where(
-        models.SocialPost.posted_at >= day_ago
+
+    day_ago = utils_base.now_timestamp() - 60 * 60 * 24
+
+    # базовый SELECT
+    query = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects),
+        )
+        .where(models.SocialPost.posted_at >= day_ago)
     )
-    
-    # Добавляем JOIN с ProjectMention для фильтрации по проектам
-    query = query.outerjoin(
-        models.ProjectMention,
-        models.SocialPost.id == models.ProjectMention.post_id
-    )
-    
-    # Добавляем JOIN с ProjectAccountStatus для фильтрации по связям с проектами
-    query = query.outerjoin(
-        models.ProjectAccountStatus,
-        models.SocialPost.account_id == models.ProjectAccountStatus.account_id
-    )
-    
-    # Формируем условия фильтрации
-    conditions = []
-    
-    # Если указаны проекты, добавляем условие по проектам
+
+    # --- фильтр по project_ids через EXISTS, чтобы избежать дубликатов ---
     if filter.projects_ids:
-        conditions.append(models.ProjectMention.project_id.in_(filter.projects_ids))
-    
-    # Добавляем условия по связям с проектами
+        mention_exists = (
+            select(literal(1))
+            .select_from(models.ProjectMention)
+            .where(
+                and_(
+                    models.ProjectMention.post_id == models.SocialPost.id,
+                    models.ProjectMention.project_id.in_(filter.projects_ids),
+                )
+            )
+            .exists()
+        )
+        query = query.where(mention_exists)
+
+    # --- фильтр по типу источников (привязан / не привязан к проекту) ---
     if filter.include_project_sources != filter.include_other_sources:
+        account_link_exists = (
+            select(literal(1))
+            .select_from(models.ProjectAccountStatus)
+            .where(models.ProjectAccountStatus.account_id == models.SocialPost.account_id)
+            .exists()
+        )
+
         if filter.include_project_sources:
-            conditions.append(models.ProjectAccountStatus.id.isnot(None))
+            query = query.where(account_link_exists)
         else:
-            conditions.append(models.ProjectAccountStatus.id.is_(None))
-    
-    # Применяем все условия
-    if conditions:
-        query = query.where(or_(*conditions))
-    
-    # Сортируем по дате публикации
-    query = query.order_by(desc(models.SocialPost.posted_at))
-    
-    # Выполняем запрос
+            query = query.where(~account_link_exists)
+
+    # --- сортировка ---
+    if sort_type == enums.SortType.NEW:
+        query = query.order_by(desc(models.SocialPost.posted_at))
+    elif sort_type == enums.SortType.POPULAR:
+        # Коррелированный подзапрос: берём только одну – самую свежую – статистику для поста
+        latest_score_subq = (
+            select(
+                (
+                    func.coalesce(models.SocialPostStatistic.views, 0)
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 0.5
+                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
+                )
+            )
+            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
+            .order_by(desc(models.SocialPostStatistic.created_at))
+            .limit(1)
+            .scalar_subquery()
+        )
+
+        popularity_expr = func.coalesce(latest_score_subq, 0)
+        query = query.order_by(desc(popularity_expr))
+    else:
+        # На случай добавления новых типов сортировки в будущем
+        raise exceptions.BusinessError(code="invalid_sort_type", message="Invalid sort type")
+
+    # --- лимит ---
+    query = query.limit(limit)
+
+    # выполняем
     result = db.execute(query).unique().scalars().all()
-    
     return result
-    
-    
+
 async def get_projects_all(db: Session) -> List[models.Project]:
     stmt = select(models.Project)
     return db.execute(stmt).scalars().all()
@@ -798,6 +828,49 @@ def create_or_update_project_account_status(
         session.commit()
         session.refresh(status)
         return status
+
+async def delete_old_posts(db: Session, older_than_timestamp: int) -> int:
+    """
+    Удаляет все посты старше указанного timestamp.
+    
+    Args:
+        db: Сессия базы данных
+        older_than_timestamp: Timestamp, посты старше которого будут удалены
+        
+    Returns:
+        Количество удаленных постов
+    """
+    # Сначала удаляем связанные данные (статистику и упоминания)
+    # Получаем ID постов для удаления
+    posts_to_delete_stmt = select(models.SocialPost.id).where(
+        models.SocialPost.posted_at < older_than_timestamp
+    )
+    post_ids = db.execute(posts_to_delete_stmt).scalars().all()
+    
+    if not post_ids:
+        return 0
+    
+    # Удаляем статистику постов
+    delete_stats_stmt = delete(models.SocialPostStatistic).where(
+        models.SocialPostStatistic.post_id.in_(post_ids)
+    )
+    db.execute(delete_stats_stmt)
+    
+    # Удаляем упоминания проектов в постах
+    delete_mentions_stmt = delete(models.ProjectMention).where(
+        models.ProjectMention.post_id.in_(post_ids)
+    )
+    db.execute(delete_mentions_stmt)
+    
+    # Удаляем сами посты
+    delete_posts_stmt = delete(models.SocialPost).where(
+        models.SocialPost.posted_at < older_than_timestamp
+    )
+    result = db.execute(delete_posts_stmt)
+    
+    db.commit()
+    
+    return result.rowcount
 
 
     

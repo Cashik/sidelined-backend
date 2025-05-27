@@ -137,6 +137,42 @@ def sync_posts():
     asyncio.run(sync_posts_async())
 
 
+async def cleanup_old_posts_async(dry_run: bool = False):
+    """
+    Очистка старых постов из базы данных.
+    """
+    from src.config.settings import settings
+    
+    session = SessionLocal()
+    try:
+        cutoff_timestamp = utils_base.now_timestamp() - settings.POST_INACTIVE_TIME_SECONDS
+        
+        if dry_run:
+            # В режиме dry-run только показываем, что будет удалено
+            stmt = select(models.SocialPost).where(models.SocialPost.posted_at < cutoff_timestamp)
+            posts_to_delete = session.execute(stmt).scalars().all()
+            print(f"В режиме dry-run: найдено {len(posts_to_delete)} постов для удаления")
+            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_INACTIVE_TIME_SECONDS} секунд)")
+            for post in posts_to_delete[:5]:  # Показываем первые 5 для примера
+                print(f"  - Post ID: {post.id}, Posted at: {post.posted_at}, Text: {post.text[:50]}...")
+            if len(posts_to_delete) > 5:
+                print(f"  ... и ещё {len(posts_to_delete) - 5} постов")
+        else:
+            # Реальное удаление
+            deleted_count = await crud.delete_old_posts(session, cutoff_timestamp)
+            print(f"Успешно удалено {deleted_count} старых постов")
+            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_INACTIVE_TIME_SECONDS} секунд)")
+    finally:
+        session.close()
+
+
+def cleanup_old_posts(dry_run: bool = False):
+    """
+    Очистка старых постов из базы данных.
+    """
+    asyncio.run(cleanup_old_posts_async(dry_run))
+
+
 def create_admin_user(login: str, password: str, role: str):
     """Создать администратора или модератора"""
     role_upper = role.upper()
@@ -209,6 +245,10 @@ def main():
     # Команда синхронизации постов
     sync_posts_parser = subparsers.add_parser('sync-posts', help='Синхронизировать посты')
 
+    # Команда очистки старых постов
+    cleanup_parser = subparsers.add_parser('cleanup-old-posts', help='Удалить старые посты')
+    cleanup_parser.add_argument('--dry-run', action='store_true', help='Показать что будет удалено, но не удалять')
+
     # Команда создания админа/модератора
     create_admin_parser = subparsers.add_parser('create-admin', help='Создать администратора/модератора')
     create_admin_parser.add_argument('--login', '-l', required=True, help='Логин')
@@ -231,6 +271,8 @@ def main():
         sync_projects()
     elif args.command == 'sync-posts':
         sync_posts()
+    elif args.command == 'cleanup-old-posts':
+        cleanup_old_posts(args.dry_run)
     elif args.command == 'create-admin':
         create_admin_user(args.login, args.password, args.role)
     elif args.command == 'delete-all-admins':
@@ -245,6 +287,8 @@ python -m src.cli create-promo-code --code "PROMO_CODE" --valid-until "VALID_UNT
 python -m src.cli change-promo-code --code "PROMO_CODE" --valid-until "VALID_UNTIL"
 python -m src.cli sync-projects
 python -m src.cli sync-posts
+python -m src.cli cleanup-old-posts --dry-run
+python -m src.cli cleanup-old-posts
 python -m src.cli create-admin --login "LOGIN" --password "PASSWORD" --role "ROLE"
 """
 

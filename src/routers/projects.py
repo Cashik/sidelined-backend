@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, desc
 import logging
 import json
 import jsonschema
@@ -107,37 +106,24 @@ async def get_feed(
     filter = schemas.FeedFilter(
         projects_ids=projects_ids,
         include_project_sources=include_project_sources,
-        include_other_sources=include_other_sources
+        include_other_sources=include_other_sources,
     )
-    
-    sort = schemas.FeedSort(type=sort_type)
-    
-    posts: List[models.SocialPost] = await crud.get_posts(filter, db)
-    
+
+    posts: List[models.SocialPost] = await crud.get_posts(
+        filter=filter,
+        sort_type=sort_type,
+        db=db,
+        limit=100,
+    )
+
     logger.info(f"Found {len(posts)} posts")
-    # сортируем посты по выбранному типу сортировки
-    def score_post(post: models.SocialPost) -> float:
-        # (views *1 + likes *0.5 + retweets*2)
-        try:
-            stats: models.SocialPostStatistic = post.statistic[0]
-            return stats.views * 1 + stats.likes * 0.5 + stats.retweets * 2
-        except:
-            logger.error(f"No statistics for post {post.id}")
-            return 0
-    
-    if sort.type == enums.SortType.POPULAR:
-        posts.sort(key=score_post, reverse=True)
-    elif sort.type == enums.SortType.NEW:
-        posts.sort(key=lambda x: x.posted_at, reverse=True)
-    else:
-        raise Exception("Invalid sort type")
     
     # Преобразуем модели в схемы
     posts_schemas = []
     for post in posts:
         try:
-            # Получаем статистику поста
-            stats = post.statistic[0] if post.statistic else None
+            # Берём самую свежую статистику (по created_at)
+            stats = max(post.statistic, key=lambda s: s.created_at) if post.statistic else None
             
             # Получаем статусы аккаунта в проектах
             account_projects_statuses = []

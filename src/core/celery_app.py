@@ -25,17 +25,21 @@ celery_app = Celery(
     backend=redis_url,
     include=[
         "src.tasks.sync_posts",  # регистрируем модуль с задачами
+        "src.tasks.cleanup_posts",  # регистрируем модуль с задачами очистки
     ],
 )
 
 # ---- Celery конфигурация ----
 # Интервал синхронизации постов (сек). По умолчанию 60 сек для dev.
-POST_SYNC_PERIOD_SEC = int(os.getenv("POST_SYNC_PERIOD_SEC", "60"))
-
 celery_app.conf.beat_schedule = {
     "sync-posts": {
         "task": "src.tasks.sync_posts.sync_posts",
-        "schedule": POST_SYNC_PERIOD_SEC,
+        "schedule": settings.POST_SYNC_PERIOD_SECONDS,
+        "options": {"queue": "default"},
+    },
+    "cleanup-old-posts": {
+        "task": "src.tasks.cleanup_posts.cleanup_old_posts",
+        "schedule": settings.POST_CLEANUP_TIME_SECONDS,
         "options": {"queue": "default"},
     },
 }
@@ -43,4 +47,5 @@ celery_app.conf.beat_schedule = {
 # Роутинг задач
 celery_app.conf.task_routes = {
     "src.tasks.sync_posts.sync_posts": {"queue": "default"},
+    "src.tasks.cleanup_posts.cleanup_old_posts": {"queue": "default"},
 } 

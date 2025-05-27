@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
+    # Auto-Yap settings
+    # время, через которое происходит синхронизация данных с твиттером
+    POST_SYNC_PERIOD_SECONDS: int = 600 # каждые 10 минут
+    # Период времени, через который посты станут неактуальными и их нужно будет удалить
+    POST_INACTIVE_TIME_SECONDS: int = 60*60*24
+    # Период времени, через который система будет очищать старые посты
+    POST_CLEANUP_TIME_SECONDS: int = 60
+    
+    
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
