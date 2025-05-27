@@ -449,7 +449,12 @@ async def call_tool(
         else:
             # если это не дефолтный тулбокс, то вызываем его через MCP
                 # Получаем сервер для выбранного тулбокса
-            server = next((server for server in mcp_servers if server.name == request.toolbox_name), None)
+            server = None 
+            for server in mcp_servers.values():
+                if server.name == request.toolbox_name:
+                    server = server
+                    break
+            logger.info(f"Server: {server} {request.toolbox_name} {mcp_servers}")
             if not server:
                 raise exceptions.APIError(code="server_configuration_not_found", message=f"Server configuration for {request.toolbox_name} not found", status_code=500)
             mcp_client = MCPClient(server)
