@@ -70,8 +70,8 @@ class PromoCodeType(Enum):
 
 
 class ProjectAccountStatusType(Enum):
-    MEDIA = "official_media"
-    FOUNDER = "founder"
+    MEDIA = "MEDIA"
+    FOUNDER = "FOUNDER"
     
 
 class SortType(Enum):
