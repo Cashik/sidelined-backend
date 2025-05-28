@@ -630,7 +630,8 @@ async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.P
         pass
     default_model = ai_models[0]
     # 4. фид выделенных проектов пользователя
-    for project in selected_projects:
+    for selected_project in selected_projects:
+        project = selected_project.project
         # получаем фид проекта
         # TODO: возможно, стоит кешировать фид проекта
         project_posts: List[models.SocialPost] = await crud.get_project_feed(project, feed_timestamp_period, db)
@@ -642,7 +643,7 @@ async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.P
         # убираем самые непопулярные посты
         project_feed = project_feed[:feed_limit]
         # сортируем еще раз по времени публикации 
-        project_feed.sort(key=lambda x: x.posted_at, reverse=False)
+        project_feed.sort(key=lambda x: x.created_timestamp, reverse=False)
         
         
         generation_settings: schemas.AutoYapsGenerationSettings = schemas.AutoYapsGenerationSettings(
@@ -662,9 +663,9 @@ async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.P
             ))
     
     # сохраняем шаблоны
-    #TODO: await crud.create_post_examples(templates, db)
+    result = await crud.create_post_examples(templates, db)
 
-    return templates
+    return result
 
 
 

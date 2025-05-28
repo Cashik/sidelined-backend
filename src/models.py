@@ -360,3 +360,9 @@ class PostTemplate(Base):
     # Relationships
     user = relationship("User", back_populates="post_templates")
     project = relationship("Project", passive_deletes=False) # обратная ссылка не нужна, но каскадное удаление работает
+    
+    def __str__(self) -> str:
+        return f"PostTemplate #{self.id} for project {self.project_id}"
+    
+    def __repr__(self) -> str:
+        return f"<PostTemplate(id={self.id}, user_id={self.user_id}, project_id={self.project_id})>"

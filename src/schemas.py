@@ -500,6 +500,8 @@ class PostExampleCreate(BaseModel):
 class PostExample(PostExampleCreate):
     id: int
     created_at: int
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class AutoYapsGenerationSettings(BaseModel):
     project_feed: List[Post]

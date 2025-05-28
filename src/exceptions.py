@@ -67,3 +67,11 @@ class PromoCodeActivationError(BusinessError):
     def __init__(self, message: str):
         super().__init__(code="promo_code_activation_error", message=message)
 
+class PromoCodeNotFoundError(BusinessError):
+    def __init__(self):
+        super().__init__(code="promo_code_not_found", message="Promo code not found")
+
+class AutoYapsError(BusinessError):
+    def __init__(self, message: str):
+        super().__init__(code="auto_yaps_error", message=message)
+

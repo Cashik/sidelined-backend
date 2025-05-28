@@ -23,24 +23,7 @@ from src.services.x_api_service import XApiService
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-router = APIRouter(prefix="/projects", tags=["Auto-Yaps"])
-
-
-@router.get("/posts/search/test")
-async def search_posts(query: str, db: Session = Depends(get_session)):
-    """
-    Поиск постов в X (Twitter)
-    """
-    project = models.Project(
-        name="query",
-        description="test",
-        url="test",
-        keywords="test"
-    )
-    # время за неделю назад
-    tm = utils_base.now_timestamp() - 60*60*24*7
-    await utils.update_project_data(project, tm, db)
-    return "ok"
+router = APIRouter(prefix="/yaps", tags=["Auto-Yaps"])
 
 class Project(BaseModel):
     id: int
@@ -127,15 +110,15 @@ async def get_feed(
     return response
 
 
-@router.get("/brain_settings", response_model=schemas.PersonalizationSettings)
-async def get_brain_settings(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+@router.get("/auto/settings", response_model=schemas.PersonalizationSettings)
+async def get_autoyaps_settings(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Получение настроек для нейросети
     """
     return await crud.get_brain_settings(user, db)
 
-@router.post("/brain_settings", response_model=schemas.PersonalizationSettings)
-async def set_brain_settings(request: schemas.PersonalizationSettings, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+@router.post("/auto/settings", response_model=schemas.PersonalizationSettings)
+async def set_autoyaps_settings(request: schemas.PersonalizationSettings, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Установка настроек для нейросети
     """
@@ -145,7 +128,7 @@ class FeedTemplatesResponse(BaseModel):
     templates: List[schemas.PostExample]
     new_templates_available: bool
 
-@router.get("/feed/templates", response_model=FeedTemplatesResponse)
+@router.get("/auto/templates", response_model=FeedTemplatesResponse)
 async def get_feed_templates(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Получение шаблонов для auto-yaps
@@ -155,7 +138,7 @@ async def get_feed_templates(user: models.User = Depends(get_current_user), db: 
         new_templates_available=True
     )
 
-@router.post("/feed/templates", response_model=FeedTemplatesResponse)
+@router.post("/auto/templates", response_model=FeedTemplatesResponse)
 async def create_feed_template(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Создание шаблонов для auto-yaps
@@ -163,7 +146,7 @@ async def create_feed_template(user: models.User = Depends(get_current_user), db
     new_templates = await utils.create_user_autoyaps(user, db)
     return FeedTemplatesResponse(
         templates=new_templates,
-        new_templates_available=False
+        new_templates_available=True
     )
 
 

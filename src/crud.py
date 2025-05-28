@@ -971,3 +971,32 @@ async def get_project_feed(project: models.Project, period_timestamp: int, sessi
     return session.execute(stmt).unique().scalars().all()
 
 
+async def create_post_examples(templates: List[schemas.PostExampleCreate], db: Session) -> List[schemas.PostExample]:
+    """
+    Создание шаблонных постов для юзера
+    """
+    # Создаем объекты модели
+    post_examples_db = []
+    for template in templates:
+        post_example_db = models.PostTemplate(
+            project_id=template.project_id,
+            user_id=template.user_id,
+            post_text=template.post_text
+        )
+        db.add(post_example_db)
+        post_examples_db.append(post_example_db)
+    
+    # Сохраняем все объекты в базу данных
+    db.commit()
+    
+    # Обновляем объекты, чтобы получить сгенерированные поля (id, created_at)
+    for post_example_db in post_examples_db:
+        db.refresh(post_example_db)
+    
+    # Преобразуем в схемы
+    result: List[schemas.PostExample] = []
+    for post_example_db in post_examples_db:
+        result.append(schemas.PostExample.model_validate(post_example_db))
+    
+    return result
+
