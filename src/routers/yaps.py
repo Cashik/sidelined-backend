@@ -149,4 +149,18 @@ async def create_feed_template(user: models.User = Depends(get_current_user), db
         new_templates_available=True
     )
 
+class YapsPersonalizationRequest(BaseModel):
+    text: str
+
+class YapsPersonalizationResponse(BaseModel):
+    text: str
+    
+@router.post("/personalize", response_model=YapsPersonalizationResponse)
+async def personalize(request: YapsPersonalizationRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Персонализация текста для авто-постов
+    """
+    # TODO: снимать кредиты с пользователя
+    result = f"Post with text: {request.text} was personalized."
+    return YapsPersonalizationResponse(text=result)
 
