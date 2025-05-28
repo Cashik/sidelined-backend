@@ -1,3 +1,4 @@
+from enum import Enum
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
@@ -119,40 +120,50 @@ async def get_feed(
     logger.info(f"Found {len(posts)} posts")
     
     # Преобразуем модели в схемы
-    posts_schemas = []
-    for post in posts:
-        try:
-            # Берём самую свежую статистику (по created_at)
-            stats = max(post.statistic, key=lambda s: s.created_at) if post.statistic else None
-            
-            # Получаем статусы аккаунта в проектах
-            account_projects_statuses = []
-            for project_status in post.account.projects:
-                account_projects_statuses.append(schemas.SourceStatusInProject(
-                    project_id=project_status.project_id,
-                    source_type=project_status.type
-                ))
-            
-            # Создаем схему поста
-            post_schema = schemas.Post(
-                text=post.text,
-                created_timestamp=post.posted_at,
-                full_post_json=post.raw_data,  # В данном случае полный текст совпадает с обычным
-                stats=schemas.PostStats(
-                    favorite_count=stats.likes if stats else 0,
-                    retweet_count=stats.reposts if stats else 0,
-                    reply_count=stats.comments if stats else 0,
-                    views_count=stats.views if stats else 0
-                ),
-                account_name=post.account.name,
-                account_projects_statuses=account_projects_statuses
-            )
-            posts_schemas.append(post_schema)
-        except Exception as e:
-            logger.error(f"Error converting post {post.id} to schema: {str(e)}")
-            continue
+    posts_schemas = utils.convert_posts_to_schemas(posts)
+    
     
     response = schemas.GetFeedResponse(posts=posts_schemas)
     return response
+
+
+@router.get("/brain_settings", response_model=schemas.PersonalizationSettings)
+async def get_brain_settings(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Получение настроек для нейросети
+    """
+    return await crud.get_brain_settings(user, db)
+
+@router.post("/brain_settings", response_model=schemas.PersonalizationSettings)
+async def set_brain_settings(request: schemas.PersonalizationSettings, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Установка настроек для нейросети
+    """
+    return await crud.set_brain_settings(request, user, db)
+
+class FeedTemplatesResponse(BaseModel):
+    templates: List[schemas.PostExample]
+    new_templates_available: bool
+
+@router.get("/feed/templates", response_model=FeedTemplatesResponse)
+async def get_feed_templates(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Получение шаблонов для auto-yaps
+    """
+    return FeedTemplatesResponse(
+        templates=await crud.get_feed_templates(user, db),
+        new_templates_available=True
+    )
+
+@router.post("/feed/templates", response_model=FeedTemplatesResponse)
+async def create_feed_template(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Создание шаблонов для auto-yaps
+    """
+    new_templates = await utils.create_user_autoyaps(user, db)
+    return FeedTemplatesResponse(
+        templates=new_templates,
+        new_templates_available=False
+    )
 
 

@@ -14,8 +14,10 @@ from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
 from src import schemas, enums, models, exceptions, crud
 from src.config.settings import settings
 from src.config.subscription_plans import subscription_plans
+from src.config.ai_models import all_ai_models as ai_models
 from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
+from src.services import x_api_service
 from src.config.mcp_servers import mcp_servers as mcp_servers_list
 from src.utils_base import now_timestamp, parse_date_to_timestamp
 import inspect
@@ -554,5 +556,206 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
         return False
 
     return True
+
+
+def calculate_engagement_score(post: schemas.Post) -> float:
+    """
+    Расчет показателя вовлеченности поста.
+    """
+    return post.stats.views_count*0.001 + post.stats.favorite_count * 1 + post.stats.retweet_count * 3 + post.stats.reply_count * 4
+
+def convert_posts_to_schemas(posts: List[models.SocialPost]) -> List[schemas.Post]:
+    """
+    Преобразование списка моделей постов в список схем.
+    """
+    result = []
+    for post in posts:
+        try:
+            # Берём самую свежую статистику (по created_at)
+            stats = max(post.statistic, key=lambda s: s.created_at) if post.statistic else None
+            
+            # Получаем статусы аккаунта в проектах
+            account_projects_statuses = []
+            for project_status in post.account.projects:
+                account_projects_statuses.append(schemas.SourceStatusInProject(
+                    project_id=project_status.project_id,
+                    source_type=project_status.type
+                ))
+            
+            # Создаем схему поста
+            post_schema = schemas.Post(
+                text=post.text,
+                created_timestamp=post.posted_at,
+                full_post_json=post.raw_data,  # В данном случае полный текст совпадает с обычным
+                stats=schemas.PostStats(
+                    favorite_count=stats.likes if stats else 0,
+                    retweet_count=stats.reposts if stats else 0,
+                    reply_count=stats.comments if stats else 0,
+                    views_count=stats.views if stats else 0
+                ),
+                account_name=post.account.name,
+                account_projects_statuses=account_projects_statuses
+            )
+            result.append(post_schema)
+        except Exception as e:
+            logger.error(f"Error converting post {post.id} to schema: {str(e)}")
+            continue
+    return result
+
+
+async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.PostExample]:
+    """
+    Создание auto-yaps(шаблоны для авто-постов) для пользователя по его выбранным проектам и настройкам.
+    
+    Шаблоны создаются для каждого выделенного пользователем проекта отдельно.
+    """
+    # TODO: проверяем, если ли у пользователя возможность создавать авто-посты (лимит или подписка)
+    # TODO: нужно ли забирать кредиты у пользователя за создание авто-постов?
+    feed_limit = 100
+    feed_timestamp_period = 60 * 60 * 24 * 1  # 1 day
+    # проверяем, есть ли выделенные проекты
+    if not user.selected_projects:
+        raise exceptions.AutoYapsError("No selected projects for generating auto-yaps.")
+    templates = []
+    
+    # --- собираем нужные данные ---
+    # 1. выбранные проекты
+    selected_projects = user.selected_projects
+    # 2. настройки
+    brain_settings = await crud.get_brain_settings(user, db)
+    # 3. получаем последние твиты пользователя, если есть
+    user_tweets = []
+    if brain_settings.user_social_login:
+        # TODO: реализовать получение последних твитов пользователя из базы или напрямую из x api
+        pass
+    default_model = ai_models[0]
+    # 4. фид выделенных проектов пользователя
+    for project in selected_projects:
+        # получаем фид проекта
+        # TODO: возможно, стоит кешировать фид проекта
+        project_posts: List[models.SocialPost] = await crud.get_project_feed(project, feed_timestamp_period, db)
+        
+        # преобразуем в схему
+        project_feed = convert_posts_to_schemas(project_posts)
+        # сортируем по убыванию популярности
+        project_feed.sort(key=lambda x: calculate_engagement_score(x), reverse=True)
+        # убираем самые непопулярные посты
+        project_feed = project_feed[:feed_limit]
+        # сортируем еще раз по времени публикации 
+        project_feed.sort(key=lambda x: x.posted_at, reverse=False)
+        
+        
+        generation_settings: schemas.AutoYapsGenerationSettings = schemas.AutoYapsGenerationSettings(
+            project_feed=project_feed,
+            user_tweets=user_tweets,
+            content_settings=brain_settings.content,
+            style_settings=brain_settings.style,
+            model=default_model
+        )
+    
+        examples_posts: List[str] = await generate_pots_examples(generation_settings)
+        for post in examples_posts:
+            templates.append(schemas.PostExampleCreate(
+                project_id=project.id,
+                user_id=user.id,
+                post_text=post
+            ))
+    
+    # сохраняем шаблоны
+    #TODO: await crud.create_post_examples(templates, db)
+
+    return templates
+
+
+
+async def generate_pots_examples(generation_settings: schemas.AutoYapsGenerationSettings, count: int = 5) -> List[str]:
+    """
+    Генерация примеров постов (твитов) на основе переданных настроек.
+
+    Использует native structured-output LangChain (`with_structured_output`),
+    поэтому модель обязана вернуть JSON с ключом `posts`.
+    Возвращает список ровно `count` твитов.
+    """
+    # --- локальные импорты, чтобы не тащить их при старте всего приложения ---
+    from langchain.chat_models import init_chat_model
+    from pydantic import BaseModel, Field, ValidationError
+
+    # 1. Подготовка входных данных (усечённые тексты, чтобы не раздуть prompt)
+    def _prepare_posts(posts: List[schemas.Post], limit: int = 10, max_len: int = 200) -> str:
+        """Конкатенирует первые `limit` постов, обрезая каждый до `max_len` символов."""
+        lines = []
+        for p in posts[:limit]:
+            text = p.text.replace("\n", " ")[:max_len]
+            lines.append(f"- {text}")
+        return "\n".join(lines)
+
+    project_feed_str = _prepare_posts(generation_settings.project_feed)
+    user_tweets_str = _prepare_posts(generation_settings.user_tweets) if generation_settings.user_tweets else ""
+
+    # 2. Prompt (TODO: вынести в PromptService)
+    SYSTEM_PROMPT = (
+        "Ты — продвинутый SMM-копирайтер. На основе предоставленных данных сгенерируй "
+        f"ровно {count} твитов о проекте. Каждый твит ≤280 символов, без нумерации, кавычек и лишних пояснений.\n"
+        "Верни результат строго в формате, соответствующем схеме инструмента, не добавляй никакого дополнительного текста."
+    )
+
+    USER_PROMPT = (
+        "# Данные проекта (feed)\n"
+        f"{project_feed_str}\n\n"
+        "# Предпочтения по стилю и контенту\n"
+        f"Style: {generation_settings.style_settings.model_dump()}\n"
+        f"Content: {generation_settings.content_settings.model_dump()}\n\n"
+    )
+    if user_tweets_str:
+        USER_PROMPT += f"# Недавние твиты пользователя\n{user_tweets_str}\n\n"
+
+    # 3. Схема ответа (Pydantic)
+    class GeneratePostsResponse(BaseModel):
+        posts: List[str] = Field(description=f"Список из {count} твитов, каждый ≤280 символов")
+
+    # 4. Инициализация LLM
+    model_provider = ""
+    if generation_settings.model.id in [enums.Model.GPT_4O, enums.Model.GPT_4_1, enums.Model.GPT_O4_MINI]:
+        model_provider = "openai"
+        api_key = settings.OPENAI_API_KEY
+    elif generation_settings.model.id in [enums.Model.GEMINI_2_5_FLASH, enums.Model.GEMINI_2_5_PRO]:
+        model_provider = "google_genai"
+        api_key = settings.GEMINI_API_KEY
+    else:
+        raise NotImplementedError(f"Provider for model {generation_settings.model.id} not supported in generate_pots_examples")
+
+    llm = init_chat_model(
+        model=generation_settings.model.id.value if hasattr(generation_settings.model.id, "value") else generation_settings.model.id,
+        model_provider=model_provider,
+        api_key=api_key,
+        temperature=0.7,
+        max_tokens=512,
+    ).with_structured_output(GeneratePostsResponse)
+
+    try:
+        result: GeneratePostsResponse = await llm.ainvoke([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT},
+        ])
+    except ValidationError as e:
+        # Попытка ретрая с более жёстким системным промптом
+        strict_prompt = SYSTEM_PROMPT + "\nВНИМАНИЕ: твой ответ ДОЛЖЕН быть JSON, полностью соответствовать схеме, иначе ошибка."
+        result: GeneratePostsResponse = await llm.ainvoke([
+            {"role": "system", "content": strict_prompt},
+            {"role": "user", "content": USER_PROMPT},
+        ])
+    # 5. Пост-обработка и финальная валидация длины твитов
+    cleaned: List[str] = []
+    for tw in result.posts:
+        tw_clean = tw.strip().replace("\n", " ")
+        if len(tw_clean) > 280:
+            tw_clean = tw_clean[:277] + "…"
+        cleaned.append(tw_clean)
+    # гарантия нужного количества
+    if len(cleaned) != count:
+        cleaned = cleaned[:count]
+        while len(cleaned) < count:
+            cleaned.append("")  # заполнитель, можно поднять ошибку
+    return cleaned
 
 

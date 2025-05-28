@@ -418,31 +418,15 @@ async def delete_user_address(
 
 async def delete_user(user: models.User, session: Session) -> None:
     """
-    Полностью удаляет пользователя и все связанные с ним данные:
-    - Чаты и сообщения
-    - Факты о пользователе
-    - Адреса кошельков
+    Полностью удаляет пользователя и все связанные с ним данные.
+    Благодаря каскадному удалению на уровне базы данных, все связанные записи 
+    (чаты, сообщения, факты, адреса кошельков, промо-коды, шаблоны постов, выбранные проекты)
+    будут удалены автоматически.
     """
     if not user:
         raise exceptions.UserNotFoundError()
     
-    # Удаляем все чаты пользователя (это автоматически удалит все сообщения)
-    for chat in user.chats:
-        session.delete(chat)
-    
-    # Удаляем все факты пользователя
-    for fact in user.facts:
-        session.delete(fact)
-    
-    # Удаляем все адреса кошельков
-    for address in user.wallet_addresses:
-        session.delete(address)
-    
-    # Удаляем все активации промо-кодов
-    for promo_code_usage in user.promo_code_usage:
-        session.delete(promo_code_usage)
-    
-    # Удаляем самого пользователя
+    # Удаляем пользователя - все связанные данные удалятся автоматически благодаря CASCADE
     session.delete(user)
     session.commit()
 
@@ -872,5 +856,118 @@ async def delete_old_posts(db: Session, older_than_timestamp: int) -> int:
     
     return result.rowcount
 
-
+async def get_brain_settings(user: models.User, session: Session) -> schemas.PersonalizationSettings:
+    """
+    Получение настроек персонализации пользователя
+    """
+    if not user:
+        raise exceptions.UserNotFoundError()
     
+    if user.personalization_brain_settings:
+        try:
+            # Используем безопасную схему для извлечения из базы данных
+            brain_settings_safe = schemas.PersonalizationSettingsSafe.model_validate(user.personalization_brain_settings)
+            logger.info(f"Retrieved brain settings for user {user.id}: {brain_settings_safe}")
+            
+            # Преобразуем в обычную схему для ответа (простое копирование полей)
+            return schemas.PersonalizationSettings.model_validate(brain_settings_safe.model_dump())
+        except Exception as e:
+            logger.warning(f"Error validating brain settings for user {user.id}: {e}")
+            # Возвращаем настройки по умолчанию при ошибке валидации
+            return schemas.PersonalizationSettings(
+                user_social_login="",
+                style=schemas.StyleSettings(),
+                content=schemas.ContentSettings()
+            )
+    else:
+        # Возвращаем настройки по умолчанию, если их нет в базе
+        return schemas.PersonalizationSettings(
+            user_social_login="",
+            style=schemas.StyleSettings(),
+            content=schemas.ContentSettings()
+        )
+
+
+async def set_brain_settings(
+    request: schemas.PersonalizationSettings,
+    user: models.User,
+    session: Session
+) -> schemas.PersonalizationSettings:
+    """
+    Установка настроек персонализации пользователя
+    """
+    if not user:
+        raise exceptions.UserNotFoundError()
+    
+    # Сохраняем настройки в базу данных
+    user.personalization_brain_settings = request.model_dump(mode="json")
+    logger.info(f"Updated brain settings for user {user.id}: {user.personalization_brain_settings}")
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    # Возвращаем сохраненные настройки
+    return await get_brain_settings(user, session)
+
+
+async def get_feed_templates(user: models.User, session: Session) -> List[schemas.PostExample]:
+    """
+    Получение шаблонов для auto-yaps по выбранным проектам пользователя
+    """
+    if not user:
+        raise exceptions.UserNotFoundError()
+
+    # Получаем ID выбранных проектов
+    selected_projects_ids = [project.project_id for project in user.selected_projects]
+    
+    if not selected_projects_ids:
+        return []
+    
+    # Получаем шаблоны для выбранных проектов с загрузкой связанных данных
+    stmt = (
+        select(models.PostTemplate)
+        .options(joinedload(models.PostTemplate.project))
+        .where(
+            models.PostTemplate.user_id == user.id,
+            models.PostTemplate.project_id.in_(selected_projects_ids)
+        )
+        .order_by(desc(models.PostTemplate.created_at))
+    )
+    
+    templates = session.execute(stmt).unique().scalars().all()
+    
+    return [schemas.PostExample.model_validate(template) for template in templates]
+
+
+async def get_project_feed(project: models.Project, period_timestamp: int, session: Session) -> List[models.SocialPost]:
+    """
+    Получение ленты постов для выбранного проекта за указанный период
+    
+    Args:
+        project: Проект, для которого нужно получить посты
+        period_timestamp: Период в секундах (например, 86400 для последних 24 часов)
+        session: Сессия базы данных
+        
+    Returns:
+        Список постов, связанных с проектом за указанный период
+    """
+    latest_fresh_post_timestamp = utils_base.now_timestamp() - period_timestamp
+    
+    # Получаем все посты для выбранного проекта, учитывая, что проект и пост связаны через project_mention
+    stmt = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account),
+        )
+        .join(models.ProjectMention, models.ProjectMention.post_id == models.SocialPost.id)
+        .where(
+            models.ProjectMention.project_id == project.id,
+            models.SocialPost.posted_at >= latest_fresh_post_timestamp
+        )
+        .order_by(desc(models.SocialPost.posted_at))
+    )
+    
+    return session.execute(stmt).unique().scalars().all()
+
+

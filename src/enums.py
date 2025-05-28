@@ -21,7 +21,6 @@ class Model(Enum):
     GEMINI_2_5_PRO = "gemini-2.5-pro-preview-03-25"
     GEMINI_2_5_FLASH = "gemini-2.5-flash-preview-04-17"
 
-
 class ChatStyle(Enum):
     FORMAL = "formal"
     INFORMAL = "informal"
@@ -64,16 +63,13 @@ class SubscriptionPlanType(Enum):
     PRO = "Pro"
     ULTRA = "Ultra"
 
-
 class PromoCodeType(Enum):
     PRO_UPGRADE = "pro_upgrade"
-
 
 class ProjectAccountStatusType(Enum):
     MEDIA = "MEDIA"
     FOUNDER = "FOUNDER"
     
-
 class SortType(Enum):
     NEW = "latest"
     POPULAR = "popular"
@@ -81,3 +77,37 @@ class SortType(Enum):
 class AdminRole(Enum):
     ADMIN = "ADMIN"
     MODERATOR = "MODERATOR"
+
+
+# ---------- AUTO-YAPS ---------- #
+# personalization brain settings
+class Tonality(str, Enum):
+    NEUTRAL = "neutral"
+    ENTHUSIASTIC = "enthusiastic"
+    SKEPTICAL = "skeptical"
+    IRONIC = "ironic"
+
+class Formality(str, Enum):
+    CASUAL = "casual"
+    FORMAL = "formal"
+
+class Perspective(str, Enum):
+    FIRST_PERSON = "first_person"
+    THIRD_PERSON = "third_person"
+
+class LengthOption(str, Enum):
+    SHORT = "short"       # ≤ 140 симв.
+    NORMAL = "normal"     # ≤ 220 симв.
+    LONG = "long"         # ≤ 280 симв.
+
+class EmojiUsage(str, Enum):
+    NO = "no"
+    YES = "yes"
+
+class HashtagPolicy(str, Enum):
+    FORBIDDEN = "forbidden"
+    REQUIRED = "required"
+
+class MentionsPolicy(str, Enum):
+    ANY = "any"
+    DIRECT = "direct"
