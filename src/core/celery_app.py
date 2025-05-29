@@ -10,15 +10,7 @@ from celery.signals import worker_process_init
 from src.config.settings import settings
 
 # Переменные окружения с разумными значениями по умолчанию для локального запуска
-REDIS_HOST = settings.REDIS_HOST
-REDIS_PORT = settings.REDIS_PORT
-REDIS_PASSWORD = settings.REDIS_PASSWORD
-
-# redis://[:password@]host:port/db
-if REDIS_PASSWORD:
-    redis_url = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0"
-else:
-    redis_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+redis_url = settings.REDIS_URL
 
 celery_app = Celery(
     "sidelined",

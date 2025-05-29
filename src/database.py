@@ -17,7 +17,6 @@ _celery_engine = None
 
 def create_db_engine(for_celery: bool = False):
     """Создание движка базы данных с повторными попытками подключения"""
-    logger.info(f"Attempting to connect to database at {settings.DB_HOST}:{settings.DB_PORT}")
     logger.debug(f"Database URL: {settings.DATABASE_URL}")
     
     # Базовые параметры движка

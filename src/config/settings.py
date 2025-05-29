@@ -15,16 +15,10 @@ class Settings(BaseSettings):
     TESTING: bool = False
     
     # Database settings
-    DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres"
-    DB_HOST: str = "2eden_db"
-    DB_PORT: str = "5432"
-    DB_NAME: str = "2eden"
+    DATABASE_URL: str
     
     # Redis settings
-    REDIS_HOST: str = "sidelined_redis"
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str = ""
+    REDIS_URL: str
     
     # App settings
     SECRET_KEY: str = "your-secret-key"
@@ -73,16 +67,6 @@ class Settings(BaseSettings):
     
     X_RAPIDAPI_KEY: str
     X_TWITTER_API_KEY: str
-    
-    @property
-    def DATABASE_URL(self) -> str:
-        """
-        Get database url in SQLAlchemy format
-        For testing returns in-memory SQLite
-        """
-        if self.TESTING:
-            return "sqlite://"  # Use synchronous SQLite for testing
-        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
     @property
     def ALLOWED_ORIGINS(self) -> list[str]:
