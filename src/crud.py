@@ -910,31 +910,22 @@ async def set_brain_settings(
     return await get_brain_settings(user, session)
 
 
-async def get_feed_templates(user: models.User, session: Session) -> List[schemas.PostExample]:
+async def get_feed_templates(session: Session, projects_ids: Optional[List[int]] = None, limit: int = 50) -> List[schemas.PostExample]:
     """
-    Получение шаблонов для auto-yaps по выбранным проектам пользователя
+    Получение шаблонов для auto-yaps по выбранным проектам.
+    Если projects_ids не указаны, возвращает шаблоны для всех проектов.
     """
-    if not user:
-        raise exceptions.UserNotFoundError()
-
-    # Получаем ID выбранных проектов
-    selected_projects_ids = [project.project_id for project in user.selected_projects]
+    # Получаем шаблоны для выбранных проектов или для всех проектов
+    stmt = select(models.PostTemplate)
     
-    if not selected_projects_ids:
-        return []
+    # Если указаны конкретные проекты, фильтруем по ним
+    if projects_ids:
+        stmt = stmt.where(models.PostTemplate.project_id.in_(projects_ids))
     
-    # Получаем шаблоны для выбранных проектов с загрузкой связанных данных
-    stmt = (
-        select(models.PostTemplate)
-        .options(joinedload(models.PostTemplate.project))
-        .where(
-            models.PostTemplate.user_id == user.id,
-            models.PostTemplate.project_id.in_(selected_projects_ids)
-        )
-        .order_by(desc(models.PostTemplate.created_at))
-    )
+    # Добавляем сортировку и лимит
+    stmt = stmt.order_by(desc(models.PostTemplate.created_at)).limit(limit)
     
-    templates = session.execute(stmt).unique().scalars().all()
+    templates = session.execute(stmt).scalars().all()
     
     return [schemas.PostExample.model_validate(template) for template in templates]
 
@@ -980,7 +971,6 @@ async def create_post_examples(templates: List[schemas.PostExampleCreate], db: S
     for template in templates:
         post_example_db = models.PostTemplate(
             project_id=template.project_id,
-            user_id=template.user_id,
             post_text=template.post_text
         )
         db.add(post_example_db)

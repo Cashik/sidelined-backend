@@ -35,7 +35,6 @@ class User(Base):
     wallet_addresses = relationship("WalletAddress", back_populates="user")
     promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
     selected_projects = relationship("UserSelectedProject", back_populates="user")
-    post_templates = relationship("PostTemplate", back_populates="user")
 
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
@@ -153,6 +152,7 @@ class Project(Base):
     accounts = relationship("ProjectAccountStatus", back_populates="project", cascade="all, delete-orphan")
     mentions = relationship("ProjectMention", back_populates="project", cascade="all, delete-orphan")
     user_selected_projects = relationship("UserSelectedProject", back_populates="project", cascade="all, delete-orphan")
+    posts_templates = relationship("PostTemplate", back_populates="project", cascade="all, delete-orphan")
 
     def __str__(self) -> str:
         return f"{self.name}"
@@ -353,16 +353,14 @@ class PostTemplate(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
     
-    user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
     post_text = Column(String, nullable=False)
     
     # Relationships
-    user = relationship("User", back_populates="post_templates")
-    project = relationship("Project", passive_deletes=False) # обратная ссылка не нужна, но каскадное удаление работает
+    project = relationship("Project", back_populates="posts_templates")
     
     def __str__(self) -> str:
         return f"PostTemplate #{self.id} for project {self.project_id}"
     
     def __repr__(self) -> str:
-        return f"<PostTemplate(id={self.id}, user_id={self.user_id}, project_id={self.project_id})>"
+        return f"<PostTemplate(id={self.id}, project_id={self.project_id})>"

@@ -180,7 +180,7 @@ async def generate_ai_response(prompt_service: PromptService, tools: List[schema
     logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
     
     # Некоторые модели не поддерживают системные роли или другие роли
-    avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_FLASH.value]
+    avoid_system_role = prompt_service.generate_data.chat_settings.model.value in [enums.Model.GEMINI_2_5_FLASH.value]
     logger.info(f"Avoid system role: {avoid_system_role}")
     messages = prompt_service.generate_langchain_messages(avoid_system_role)
 
@@ -192,9 +192,9 @@ async def generate_ai_response(prompt_service: PromptService, tools: List[schema
     ])
 
     model_provider = ""
-    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_FLASH, enums.Model.GEMINI_2_5_PRO]:
+    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_5_FLASH, enums.Model.GEMINI_2_5_PRO]:
         model_provider = "google_genai"
-    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4, enums.Model.GPT_4O, enums.Model.GPT_4O_MINI]:
+    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4_1, enums.Model.GPT_4O, enums.Model.GPT_O4_MINI]:
         model_provider = "openai"
     else:
         raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
@@ -603,7 +603,7 @@ def convert_posts_to_schemas(posts: List[models.SocialPost]) -> List[schemas.Pos
     return result
 
 
-async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.PostExample]:
+async def create_project_autoyaps(project: models.Project, db: Session) -> List[schemas.PostExample]:
     """
     Создание auto-yaps(шаблоны для авто-постов) для пользователя по его выбранным проектам и настройкам.
     
@@ -613,58 +613,36 @@ async def create_user_autoyaps(user: models.User, db: Session) -> List[schemas.P
     # TODO: нужно ли забирать кредиты у пользователя за создание авто-постов?
     feed_limit = 100
     feed_timestamp_period = 60 * 60 * 24 * 1  # 1 day
-    # проверяем, есть ли выделенные проекты
-    if not user.selected_projects:
-        raise exceptions.AutoYapsError("No selected projects for generating auto-yaps.")
     templates = []
     
-    # --- собираем нужные данные ---
-    # 1. выбранные проекты
-    selected_projects = user.selected_projects
-    # 2. настройки
-    brain_settings = await crud.get_brain_settings(user, db)
-    # 3. получаем последние твиты пользователя, если есть
-    user_tweets = []
-    if brain_settings.user_social_login:
-        # TODO: реализовать получение последних твитов пользователя из базы или напрямую из x api
-        pass
     default_model = ai_models[0]
-    # 4. фид выделенных проектов пользователя
-    for selected_project in selected_projects:
-        project = selected_project.project
-        # получаем фид проекта
-        # TODO: возможно, стоит кешировать фид проекта
-        project_posts: List[models.SocialPost] = await crud.get_project_feed(project, feed_timestamp_period, db)
-        
-        # преобразуем в схему
-        project_feed = convert_posts_to_schemas(project_posts)
-        # сортируем по убыванию популярности
-        project_feed.sort(key=lambda x: calculate_engagement_score(x), reverse=True)
-        # убираем самые непопулярные посты
-        project_feed = project_feed[:feed_limit]
-        # сортируем еще раз по времени публикации 
-        project_feed.sort(key=lambda x: x.created_timestamp, reverse=False)
-        
-        
-        generation_settings: schemas.AutoYapsGenerationSettings = schemas.AutoYapsGenerationSettings(
-            project_feed=project_feed,
-            user_tweets=user_tweets,
-            content_settings=brain_settings.content,
-            style_settings=brain_settings.style,
-            model=default_model
-        )
+    # получаем фид проекта
+    # TODO: возможно, стоит кешировать фид проекта
+    project_posts: List[models.SocialPost] = await crud.get_project_feed(project, feed_timestamp_period, db)
     
-        examples_posts: List[str] = await generate_pots_examples(generation_settings)
-        for post in examples_posts:
-            templates.append(schemas.PostExampleCreate(
-                project_id=project.id,
-                user_id=user.id,
-                post_text=post
-            ))
+    # преобразуем в схему
+    project_feed = convert_posts_to_schemas(project_posts)
+    # сортируем по убыванию популярности
+    project_feed.sort(key=lambda x: calculate_engagement_score(x), reverse=True)
+    # убираем самые непопулярные посты
+    project_feed = project_feed[:feed_limit]
+    # сортируем еще раз по времени публикации 
+    project_feed.sort(key=lambda x: x.created_timestamp, reverse=False)
+    
+    generation_settings: schemas.AutoYapsGenerationSettings = schemas.AutoYapsGenerationSettings(
+        project_feed=project_feed,
+        model=default_model
+    )
+
+    examples_posts: List[str] = await generate_pots_examples(generation_settings)
+    for post in examples_posts:
+        templates.append(schemas.PostExampleCreate(
+            project_id=project.id,
+            post_text=post
+        ))
     
     # сохраняем шаблоны
     result = await crud.create_post_examples(templates, db)
-
     return result
 
 
@@ -677,42 +655,59 @@ async def generate_pots_examples(generation_settings: schemas.AutoYapsGeneration
     поэтому модель обязана вернуть JSON с ключом `posts`.
     Возвращает список ровно `count` твитов.
     """
-    # --- локальные импорты, чтобы не тащить их при старте всего приложения ---
+    # --- local imports, чтобы не тащить их при старте всего приложения ---
     from langchain.chat_models import init_chat_model
     from pydantic import BaseModel, Field, ValidationError
 
     # 1. Подготовка входных данных (усечённые тексты, чтобы не раздуть prompt)
-    def _prepare_posts(posts: List[schemas.Post], limit: int = 10, max_len: int = 200) -> str:
-        """Конкатенирует первые `limit` постов, обрезая каждый до `max_len` символов."""
-        lines = []
-        for p in posts[:limit]:
-            text = p.text.replace("\n", " ")[:max_len]
-            lines.append(f"- {text}")
-        return "\n".join(lines)
+    def _prepare_posts(posts: List[schemas.Post], limit: Optional[int] = None, max_len: int = 400) -> str:
+        """Concatenates the first `limit` posts, truncating each to `max_len` characters."""
+        result = ""
+        for p in posts[:limit if limit else len(posts)]:
+            text = p.text[:max(len(p.text), max_len)]
+            result += f"Post from {p.account_name}:\n{text}\n\n"
+        return result
 
     project_feed_str = _prepare_posts(generation_settings.project_feed)
-    user_tweets_str = _prepare_posts(generation_settings.user_tweets) if generation_settings.user_tweets else ""
 
     # 2. Prompt (TODO: вынести в PromptService)
-    SYSTEM_PROMPT = (
-        "Ты — продвинутый SMM-копирайтер. На основе предоставленных данных сгенерируй "
-        f"ровно {count} твитов о проекте. Каждый твит ≤280 символов, без нумерации, кавычек и лишних пояснений.\n"
-        "Верни результат строго в формате, соответствующем схеме инструмента, не добавляй никакого дополнительного текста."
-    )
+    SYSTEM_PROMPT = """
+You are a social media content creator AI agent.
+Your task it to analyze the project feed(in X social network) and generate unique and engaging tweets about the project like a human.
+Important rules:
+- Each tweet should be ≤280 characters, without numbering, quotes, and additional explanations.
+- Return the result strictly in JSON format according to the tool schema, without any additional text.
+- Analyze the project's feed and provide an up-to-date feed.
+- Write in first or third person, as if you are a regular user.
+- Your tweets be similar to the other tweets in the project feed.
+- Do not mention the project directly (the system will do it) and do not mention anyone.
+- Your tweets must be unique and not repeat one another.
+- Use english language.
 
-    USER_PROMPT = (
-        "# Данные проекта (feed)\n"
-        f"{project_feed_str}\n\n"
-        "# Предпочтения по стилю и контенту\n"
-        f"Style: {generation_settings.style_settings.model_dump()}\n"
-        f"Content: {generation_settings.content_settings.model_dump()}\n\n"
-    )
-    if user_tweets_str:
-        USER_PROMPT += f"# Недавние твиты пользователя\n{user_tweets_str}\n\n"
+What can you write about?
+- current events in the project
+- coverage of discussed topics
+- wishes, suggestions and thoughts about the project
+- forecasts, assessments and other reflections
 
-    # 3. Схема ответа (Pydantic)
+What should you not write about?
+- answers to tweets of other users
+- about the fact that you are an AI agent and your posts are based on the feed
+- about the fact that you are using special tools for generating posts
+- unfounded statements and false facts
+    """
+
+    USER_PROMPT = f"""# Project feed
+{project_feed_str}
+# End of project feed
+IMPORTANT: follow all rules specified in the system prompt.
+"""
+
+    #logger.info(f"Generate posts examples prompt: \n{SYSTEM_PROMPT}")
+
+    # 3. Response schema
     class GeneratePostsResponse(BaseModel):
-        posts: List[str] = Field(description=f"Список из {count} твитов, каждый ≤280 символов")
+        posts: List[str] = Field(description=f"List of {count} tweets, each ≤280 characters")
 
     # 4. Инициализация LLM
     model_provider = ""
@@ -757,6 +752,150 @@ async def generate_pots_examples(generation_settings: schemas.AutoYapsGeneration
         cleaned = cleaned[:count]
         while len(cleaned) < count:
             cleaned.append("")  # заполнитель, можно поднять ошибку
+    return cleaned
+
+
+async def generate_personalized_tweets(
+    original_text: str, 
+    personalization_settings: schemas.PersonalizationSettings,
+    count: int = 3
+) -> List[str]:
+    """
+    Персонализация твита на основе настроек пользователя.
+    
+    Принимает исходный текст твита и настройки персонализации,
+    возвращает список из `count` персонализированных вариантов.
+    
+    Args:
+        original_text: Исходный текст твита для персонализации
+        personalization_settings: Настройки стиля и контента пользователя
+        count: Количество вариантов для генерации (по умолчанию 3)
+        
+    Returns:
+        Список персонализированных твитов
+    """
+    # --- local imports ---
+    from langchain.chat_models import init_chat_model
+    from pydantic import BaseModel, Field, ValidationError
+
+    # 1. Prepare prompt based on settings
+    style_instructions = []
+    content_instructions = []
+    
+    # Style settings
+    if personalization_settings.style.tonality:
+        tonality_map = {
+            enums.Tonality.NEUTRAL: "neutral tone",
+            enums.Tonality.ENTHUSIASTIC: "enthusiastic and inspiring tone", 
+            enums.Tonality.SKEPTICAL: "healthy skepticism",
+            enums.Tonality.IRONIC: "light irony"
+        }
+        style_instructions.append(f"Use {tonality_map.get(personalization_settings.style.tonality, 'neutral tone')}")
+    
+    if personalization_settings.style.formality:
+        formality_map = {
+            enums.Formality.CASUAL: "informal, conversational style",
+            enums.Formality.FORMAL: "formal, business style"
+        }
+        style_instructions.append(f"Write in {formality_map.get(personalization_settings.style.formality, 'informal style')}")
+    
+    if personalization_settings.style.perspective:
+        perspective_map = {
+            enums.Perspective.FIRST_PERSON: "first person (I, we)",
+            enums.Perspective.THIRD_PERSON: "third person"
+        }
+        style_instructions.append(f"Use {perspective_map.get(personalization_settings.style.perspective, 'any perspective')}")
+    
+    # Content settings
+    if personalization_settings.content.length:
+        length_map = {
+            enums.LengthOption.SHORT: "short (up to 140 characters)",
+            enums.LengthOption.NORMAL: "medium (up to 220 characters)", 
+            enums.LengthOption.LONG: "long (up to 280 characters)"
+        }
+        content_instructions.append(f"Make the tweet {length_map.get(personalization_settings.content.length, 'medium length')}")
+    
+    if personalization_settings.content.emoji:
+        if personalization_settings.content.emoji == enums.EmojiUsage.YES:
+            content_instructions.append("Add appropriate emojis")
+        else:
+            content_instructions.append("Do not use emojis")
+    
+    if personalization_settings.content.hashtags:
+        if personalization_settings.content.hashtags == enums.HashtagPolicy.REQUIRED:
+            content_instructions.append("Must include relevant hashtags")
+        elif personalization_settings.content.hashtags == enums.HashtagPolicy.FORBIDDEN:
+            content_instructions.append("Do not use hashtags")
+    
+    # 2. Form the prompt
+    SYSTEM_PROMPT = f"""
+You are an expert in social media content personalization. 
+Rewrite the original tweet to create {count} DIFFERENT variants, 
+each preserving the main idea but adapted to the specified style and content preferences.
+Style requirements: {'; '.join(style_instructions) if style_instructions else 'no specific requirements'}
+Content requirements: {'; '.join(content_instructions) if content_instructions else 'no specific requirements'}
+Important rules for you:
+1. Rewrite the tweet — do not reply to it.
+2. Follow the supplied style guidelines exactly for every version.
+3. Generate several variants, making each one clearly different from both the original tweet and the other variants.
+4. Each variant must not exceed 280 characters.
+5. Each variant must be written in the SAME LANGUAGE as the ORIGINAL TWEET.
+6. Return the result strictly in JSON format according to the tool schema.
+    """
+    USER_PROMPT = f"Original tweet to personalize:\n\"{original_text}\""
+    logger.info(f"Personalization prompt: \n{SYSTEM_PROMPT}\n{USER_PROMPT}")
+    
+    # 3. Response schema
+    class PersonalizedTweetsResponse(BaseModel):
+        variants: List[str] = Field(description=f"List of {count} personalized tweet variants")
+    
+    # 4. Initialize LLM (using GPT-4o by default for better personalization quality)
+    llm = init_chat_model(
+        model=enums.Model.GPT_4O.value,
+        model_provider="openai",
+        api_key=settings.OPENAI_API_KEY,
+        temperature=0.8,  # Higher creativity for variant diversity
+        max_tokens=1024,  # Increased for better generation quality
+    ).with_structured_output(PersonalizedTweetsResponse)
+    
+    try:
+        result: PersonalizedTweetsResponse = await llm.ainvoke([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT},
+        ])
+    except ValidationError as e:
+        # Retry with stricter system prompt
+        strict_prompt = SYSTEM_PROMPT + "\nIMPORTANT: Your response MUST be valid JSON that fully complies with the schema, otherwise an error will occur."
+        result: PersonalizedTweetsResponse = await llm.ainvoke([
+            {"role": "system", "content": strict_prompt},
+            {"role": "user", "content": USER_PROMPT},
+        ])
+    
+    # 5. Post-processing and final tweet length validation
+    cleaned: List[str] = []
+    for tweet in result.variants:
+        tweet_clean = tweet.strip().replace("\n", " ")
+        if len(tweet_clean) > 280:
+            tweet_clean = tweet_clean[:277] + "…"
+        cleaned.append(tweet_clean)
+    
+    # Guarantee the required number of variants
+    if len(cleaned) != count:
+        cleaned = cleaned[:count]
+        while len(cleaned) < count:
+            # If not enough variants, duplicate the last one with small modifications
+            if cleaned:
+                base_tweet = cleaned[-1]
+                # Simple modification to create a variant
+                if "!" not in base_tweet and len(base_tweet) < 279:
+                    cleaned.append(base_tweet + "!")
+                elif "." in base_tweet:
+                    cleaned.append(base_tweet.replace(".", "..."))
+                else:
+                    cleaned.append(base_tweet)
+            else:
+                cleaned.append(original_text)  # Fallback to original text
+    
     return cleaned
 
 

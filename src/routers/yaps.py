@@ -124,29 +124,32 @@ async def set_autoyaps_settings(request: schemas.PersonalizationSettings, user: 
     """
     return await crud.set_brain_settings(request, user, db)
 
+
 class FeedTemplatesResponse(BaseModel):
     templates: List[schemas.PostExample]
-    new_templates_available: bool
 
 @router.get("/auto/templates", response_model=FeedTemplatesResponse)
-async def get_feed_templates(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def get_feed_templates(
+    projects_ids: Optional[List[int]] = Query(None, description="List of project IDs to filter by"),
+    db: Session = Depends(get_session)
+):
     """
     Получение шаблонов для auto-yaps
     """
     return FeedTemplatesResponse(
-        templates=await crud.get_feed_templates(user, db),
-        new_templates_available=True
+        templates=await crud.get_feed_templates(db, projects_ids),
     )
 
+# TODO: удалить
 @router.post("/auto/templates", response_model=FeedTemplatesResponse)
-async def create_feed_template(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def create_feed_template(db: Session = Depends(get_session)):
     """
     Создание шаблонов для auto-yaps
     """
-    new_templates = await utils.create_user_autoyaps(user, db)
+    projects = await crud.get_projects_all(db)
+    new_templates = await utils.create_project_autoyaps(projects[0], db)
     return FeedTemplatesResponse(
         templates=new_templates,
-        new_templates_available=True
     )
 
 class YapsPersonalizationRequest(BaseModel):
@@ -154,6 +157,7 @@ class YapsPersonalizationRequest(BaseModel):
 
 class YapsPersonalizationResponse(BaseModel):
     text: str
+    variants: List[str] = Field(description="Few variants of personalized tweets")
     
 @router.post("/personalize", response_model=YapsPersonalizationResponse)
 async def personalize(request: YapsPersonalizationRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
@@ -161,6 +165,14 @@ async def personalize(request: YapsPersonalizationRequest, user: models.User = D
     Персонализация текста для авто-постов
     """
     # TODO: снимать кредиты с пользователя
-    result = f"Post with text: {request.text} was personalized."
-    return YapsPersonalizationResponse(text=result)
+    # Получаем настройки персонализации пользователя
+    personalization_settings = await crud.get_brain_settings(user, db)
+    
+    # Генерируем 3 персонализированных варианта
+    variants = await utils.generate_personalized_tweets(
+        original_text=request.text,
+        personalization_settings=personalization_settings,
+        count=3
+    )
+    return YapsPersonalizationResponse(text=variants[0], variants=variants)
 

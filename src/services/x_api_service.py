@@ -194,11 +194,10 @@ class XApiService:
         но since_timestamp всегда снижаем как минимальную дату в поиске.
         И так, пока не дойдем до текущей даты или посты не закончатся.
         """
-        # TODO: придумать, что делать в разных случаях ошибок
-        
         until_timestamp = None
         tweets = []
         logger.info(f"Searching for tweets from {from_timestamp} to {until_timestamp} with query: {query}")
+        
         while True:
             # получаем ленту
             feed_response: GraphQLResponse = await self._get_serch_feed(query, from_timestamp, until_timestamp)
@@ -216,7 +215,6 @@ class XApiService:
             # снижаем until_timestamp на время самого старого поста
             until_timestamp = min(parse_date_to_timestamp(tweet.legacy.created_at) for tweet in new_tweets)
             logger.info(f"Until timestamp changed to: {until_timestamp}")
-            
         
         logger.info(f"Found {len(tweets)} tweets")
         
@@ -227,7 +225,6 @@ class XApiService:
                 logger.error(f"Duplicate tweet found: {tweet.rest_id}")
             else:
                 tweets_ids[tweet.rest_id] = tweet
-        
         
         return FeedResponse(tweets=tweets)
         
@@ -251,7 +248,12 @@ class XApiService:
             params['until'] = timestamp_to_X_date(until_timestamp)
 
         response_json = None
-        async with aiohttp.ClientSession() as session:
+        
+        # Используем контекстный менеджер для каждого запроса - просто и надежно
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            connector=aiohttp.TCPConnector(limit=10, limit_per_host=5)
+        ) as session:
             try:
                 async with session.get(
                     f"https://{self.base_url}/base/apitools/search",
@@ -367,7 +369,12 @@ class XApiService:
         }
 
         response_json = None
-        async with aiohttp.ClientSession() as session:
+        
+        # Используем контекстный менеджер для каждого запроса
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            connector=aiohttp.TCPConnector(limit=10, limit_per_host=5)
+        ) as session:
             try:
                 async with session.get(
                     f"https://{self.base_url}/base/apitools/userByScreenNameV2",

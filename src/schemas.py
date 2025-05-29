@@ -494,7 +494,6 @@ class PersonalizationSettingsSafe(PersonalizationSettings):
 
 class PostExampleCreate(BaseModel):
     project_id: int
-    user_id: int
     post_text: str
 
 class PostExample(PostExampleCreate):
@@ -505,7 +504,4 @@ class PostExample(PostExampleCreate):
 
 class AutoYapsGenerationSettings(BaseModel):
     project_feed: List[Post]
-    user_tweets: List[Post]
-    content_settings: ContentSettings
-    style_settings: StyleSettings
     model: AIModel

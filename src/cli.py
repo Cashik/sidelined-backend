@@ -221,6 +221,8 @@ def delete_all_admin_users(force: bool = False):
         session.close()
 
 
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')

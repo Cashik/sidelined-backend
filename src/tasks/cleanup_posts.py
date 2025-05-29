@@ -5,11 +5,43 @@ import logging
 from sqlalchemy.orm import Session
 
 from src.core.celery_app import celery_app
-from src.database import SessionLocal
+from src.database import CelerySessionManager
 from src import crud, utils_base
 from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _cleanup_old_posts_async():
+    """
+    Асинхронная функция для очистки старых постов.
+    Выделена отдельно для правильной работы с event loop.
+    """
+    # Создаем изолированную сессию для Celery задачи
+    with CelerySessionManager() as db:
+        # Вычисляем timestamp, старше которого посты считаются неактуальными
+        cutoff_timestamp = utils_base.now_timestamp() - settings.POST_INACTIVE_TIME_SECONDS
+        
+        logger.info(
+            "cleanup_old_posts: starting cleanup for posts older than %d (cutoff: %d seconds ago)",
+            cutoff_timestamp,
+            settings.POST_INACTIVE_TIME_SECONDS
+        )
+        
+        # Удаляем старые посты
+        deleted_count = await crud.delete_old_posts(db, cutoff_timestamp)
+        
+        logger.info(
+            "cleanup_old_posts: successfully deleted %d old posts (older than %d)",
+            deleted_count,
+            cutoff_timestamp
+        )
+        
+        return {
+            "deleted_count": deleted_count,
+            "cutoff_timestamp": cutoff_timestamp,
+            "cutoff_period_seconds": settings.POST_INACTIVE_TIME_SECONDS
+        }
 
 
 @celery_app.task(
@@ -25,34 +57,8 @@ def cleanup_old_posts(self):  # type: ignore[override]
     Эта задача должна запускаться периодически для очистки устаревших данных
     и предотвращения неконтролируемого роста базы данных.
     """
-    db: Session = SessionLocal()
     try:
-        # Вычисляем timestamp, старше которого посты считаются неактуальными
-        cutoff_timestamp = utils_base.now_timestamp() - settings.POST_INACTIVE_TIME_SECONDS
-        
-        logger.info(
-            "cleanup_old_posts: starting cleanup for posts older than %d (cutoff: %d seconds ago)",
-            cutoff_timestamp,
-            settings.POST_INACTIVE_TIME_SECONDS
-        )
-        
-        # Удаляем старые посты
-        deleted_count = asyncio.run(crud.delete_old_posts(db, cutoff_timestamp))
-        
-        logger.info(
-            "cleanup_old_posts: successfully deleted %d old posts (older than %d)",
-            deleted_count,
-            cutoff_timestamp
-        )
-        
-        return {
-            "deleted_count": deleted_count,
-            "cutoff_timestamp": cutoff_timestamp,
-            "cutoff_period_seconds": settings.POST_INACTIVE_TIME_SECONDS
-        }
-        
+        return asyncio.run(_cleanup_old_posts_async())
     except Exception as exc:
         logger.error("cleanup_old_posts task failed: %s", exc, exc_info=True)
-        raise self.retry(exc=exc)
-    finally:
-        db.close() 
+        raise self.retry(exc=exc) 
