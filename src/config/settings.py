@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Redis settings
     REDIS_URL: str
     
+    # Redis SSL settings (для managed Redis на облачных провайдерах)
+    REDIS_SSL_CERT_REQS: str = "CERT_NONE"  # CERT_NONE, CERT_OPTIONAL, CERT_REQUIRED
+    REDIS_SSL_CHECK_HOSTNAME: bool = False
+    
     # App settings
     SECRET_KEY: str = "your-secret-key"
     DEBUG: bool = True
