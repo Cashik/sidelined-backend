@@ -25,4 +25,4 @@ COPY . .
 RUN apk del gcc musl-dev postgresql-dev
 
 # Проверяем, что все миграции применены и запускаем приложение
-CMD alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000
+CMD alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips='*' --proxy-headers
