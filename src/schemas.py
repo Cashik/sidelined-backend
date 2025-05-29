@@ -314,3 +314,194 @@ class ToolboxRestricted(Toolbox):
 class PromoCodeActivateRequest(BaseModel):
     code: str
 
+# схемы для Yapps feed
+
+class SourceStatusInProject(BaseModel):
+    project_id: int
+    source_type: enums.ProjectAccountStatusType
+
+class PostStats(BaseModel):
+    favorite_count: int
+    retweet_count: int
+    reply_count: int
+    views_count: Optional[int] = None
+
+class Post(BaseModel):
+    text: str
+    created_timestamp: int
+    full_post_json: Dict[str, Any]
+    stats: PostStats
+    account_name: str
+    # связь между автором поста и проектом
+    account_projects_statuses: List[SourceStatusInProject]
+
+class FeedSort(BaseModel):
+    type: Optional[enums.SortType] = Field(default=enums.SortType.NEW)
+
+class FeedFilter(BaseModel):
+    projects_ids: Optional[List[int]] = None
+    include_project_sources: Optional[bool] = Field(default=True)
+    include_other_sources: Optional[bool] = Field(default=True)
+
+class GetFeedRequest(BaseModel):
+    filter: Optional[FeedFilter] = Field(default=FeedFilter())
+    sort: Optional[FeedSort] = Field(default=FeedSort())
+
+class GetFeedResponse(BaseModel):
+    posts: List[Post]
+    
+    
+class SelectProjectsRequest(BaseModel):
+    project_ids: List[int]
+    
+    
+# ---------- SETTINGS ---------- #
+class StyleSettings(BaseModel):
+    tonality: Optional[enums.Tonality] = None
+    formality: Optional[enums.Formality] = None
+    perspective: Optional[enums.Perspective] = None
+
+class StyleSettingsSafe(StyleSettings):
+    # Валидаторы для безопасного извлечения из базы данных
+    @field_validator("tonality", mode="before")
+    def validate_tonality(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.Tonality(v)
+        except ValueError:
+            logger.warning(f"Invalid tonality: {v}")
+            return None
+
+    @field_validator("formality", mode="before")
+    def validate_formality(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.Formality(v)
+        except ValueError:
+            logger.warning(f"Invalid formality: {v}")
+            return None
+
+    @field_validator("perspective", mode="before")
+    def validate_perspective(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.Perspective(v)
+        except ValueError:
+            logger.warning(f"Invalid perspective: {v}")
+            return None
+
+
+class ContentSettings(BaseModel):
+    length: Optional[enums.LengthOption] = None
+    emoji: Optional[enums.EmojiUsage] = None
+    hashtags: Optional[enums.HashtagPolicy] = None
+    project_mention: Optional[enums.MentionsPolicy] = enums.MentionsPolicy.ANY
+
+class ContentSettingsSafe(ContentSettings):
+    # Валидаторы для безопасного извлечения из базы данных
+    @field_validator("length", mode="before")
+    def validate_length(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.LengthOption(v)
+        except ValueError:
+            logger.warning(f"Invalid length: {v}")
+            return None
+
+    @field_validator("emoji", mode="before")
+    def validate_emoji(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.EmojiUsage(v)
+        except ValueError:
+            logger.warning(f"Invalid emoji: {v}")
+            return None
+
+    @field_validator("hashtags", mode="before")
+    def validate_hashtags(cls, v):
+        if v is None:
+            return None
+        try:
+            return enums.HashtagPolicy(v)
+        except ValueError:
+            logger.warning(f"Invalid hashtags: {v}")
+            return None
+
+    @field_validator("project_mention", mode="before")
+    def validate_project_mention(cls, v):
+        if v is None:
+            return enums.MentionsPolicy.ANY  # Обязательное значение по умолчанию
+        try:
+            return enums.MentionsPolicy(v)
+        except ValueError:
+            logger.warning(f"Invalid project_mention: {v}")
+            return enums.MentionsPolicy.ANY  # Обязательное значение по умолчанию
+
+
+class PersonalizationSettings(BaseModel):
+    user_social_login: Optional[str] = None
+    style: StyleSettings = Field(default_factory=StyleSettings)
+    content: ContentSettings = Field(default_factory=ContentSettings)
+
+
+class PersonalizationSettingsSafe(PersonalizationSettings):
+    style: StyleSettingsSafe = Field(default_factory=StyleSettingsSafe)
+    content: ContentSettingsSafe = Field(default_factory=ContentSettingsSafe)
+    
+    @field_validator("user_social_login", mode="before")
+    def validate_user_social_login(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            logger.warning(f"Invalid user_social_login: {v}")
+            return None
+        if v == "":
+            logger.warning(f"Invalid user_social_login: {v}")
+            return None
+        return v
+    
+    # Простые валидаторы, делегирующие работу вложенным классам
+    @field_validator("style", mode="before")
+    def validate_style(cls, v):
+        if v is None:
+            return StyleSettingsSafe()
+        if isinstance(v, dict):
+            try:
+                return StyleSettingsSafe.model_validate(v)
+            except Exception:
+                logger.warning(f"Invalid style settings: {v}")
+                return StyleSettingsSafe()
+        return v
+
+    @field_validator("content", mode="before")
+    def validate_content(cls, v):
+        if v is None:
+            return ContentSettingsSafe()
+        if isinstance(v, dict):
+            try:
+                return ContentSettingsSafe.model_validate(v)
+            except Exception:
+                logger.warning(f"Invalid content settings: {v}")
+                return ContentSettingsSafe()
+        return v
+
+# todo: использовать схему обычного поста или тд
+
+class PostExampleCreate(BaseModel):
+    project_id: int
+    post_text: str
+
+class PostExample(PostExampleCreate):
+    id: int
+    created_at: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class AutoYapsGenerationSettings(BaseModel):
+    project_feed: List[Post]
+    model: AIModel

@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
-from sqlalchemy import select, delete, or_, and_, func, desc, update
-from sqlalchemy.orm import Session
+from sqlalchemy import select, delete, and_, or_, func, desc, update, literal
+from sqlalchemy.orm import Session, joinedload
 
 from src import models, schemas, enums, exceptions, utils_base
 from src.config.settings import settings
 import src.config.subscription_plans as subscriptions
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -417,31 +418,15 @@ async def delete_user_address(
 
 async def delete_user(user: models.User, session: Session) -> None:
     """
-    Полностью удаляет пользователя и все связанные с ним данные:
-    - Чаты и сообщения
-    - Факты о пользователе
-    - Адреса кошельков
+    Полностью удаляет пользователя и все связанные с ним данные.
+    Благодаря каскадному удалению на уровне базы данных, все связанные записи 
+    (чаты, сообщения, факты, адреса кошельков, промо-коды, шаблоны постов, выбранные проекты)
+    будут удалены автоматически.
     """
     if not user:
         raise exceptions.UserNotFoundError()
     
-    # Удаляем все чаты пользователя (это автоматически удалит все сообщения)
-    for chat in user.chats:
-        session.delete(chat)
-    
-    # Удаляем все факты пользователя
-    for fact in user.facts:
-        session.delete(fact)
-    
-    # Удаляем все адреса кошельков
-    for address in user.wallet_addresses:
-        session.delete(address)
-    
-    # Удаляем все активации промо-кодов
-    for promo_code_usage in user.promo_code_usage:
-        session.delete(promo_code_usage)
-    
-    # Удаляем самого пользователя
+    # Удаляем пользователя - все связанные данные удалятся автоматически благодаря CASCADE
     session.delete(user)
     session.commit()
 
@@ -548,3 +533,460 @@ def change_promo_code(session: Session, code: str, valid_until: int):
     session.add(promo_code)
     session.commit()
     
+
+# projects - проекты, источники, связи между ними и посты
+
+async def get_social_post_by_id(post_id: str, db: Session) -> Optional[models.SocialPost]:
+    """
+    Получение поста по его ID в социальной сети
+    """
+    stmt = select(models.SocialPost).where(models.SocialPost.social_id == post_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+async def get_social_account_by_id(account_id: str, db: Session) -> Optional[models.SocialAccount]:
+    """
+    Получение аккаунта по его ID в социальной сети
+    """
+    stmt = select(models.SocialAccount).where(models.SocialAccount.social_id == account_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+async def create_social_account(account: models.SocialAccount, db: Session) -> models.SocialAccount:
+    """
+    Создание нового аккаунта в социальной сети
+    """
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+async def create_social_post(post: models.SocialPost, db: Session) -> models.SocialPost:
+    """
+    Создание нового поста в социальной сети
+    """
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    return post
+
+async def create_or_deny_project_post_mention(project_id: int, post_id: int, db: Session) -> None:
+    """
+    Создание связи между проектом и постом, если она еще не существует
+    """
+    # Проверяем, существует ли уже такая связь
+    stmt = select(models.ProjectMention).where(
+        models.ProjectMention.project_id == project_id,
+        models.ProjectMention.post_id == post_id
+    )
+    existing_mention = db.execute(stmt).scalar_one_or_none()
+    
+    if not existing_mention:
+        # Создаем новую связь
+        mention = models.ProjectMention(
+            project_id=project_id,
+            post_id=post_id
+        )
+        db.add(mention)
+        db.commit()
+
+async def create_social_post_statistic(statistic: models.SocialPostStatistic, db: Session) -> models.SocialPostStatistic:
+    """
+    Создание статистики для поста
+    """
+    db.add(statistic)
+    db.commit()
+    db.refresh(statistic)
+    return statistic
+
+async def get_posts(
+    filter: schemas.FeedFilter,
+    sort_type: enums.SortType,
+    db: Session,
+    limit: int = 100,
+) -> List[models.SocialPost]:
+    """
+    Возвращает отфильтрованную и отсортированную ленту постов.
+
+    Параметры
+    ---------
+    filter : schemas.FeedFilter
+        Условия выборки.
+    sort_type : enums.SortType
+        Тип сортировки (NEW | POPULAR).
+    db : Session
+        SQLAlchemy-сессия.
+    limit : int
+        Максимальное число постов (по ТЗ = 100).
+    """
+
+    # Если оба флага выключены – нечего отдавать
+    if not filter.include_project_sources and not filter.include_other_sources:
+        return []
+
+    day_ago = utils_base.now_timestamp() - 60 * 60 * 24
+
+    # базовый SELECT
+    query = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects),
+        )
+        .where(models.SocialPost.posted_at >= day_ago)
+    )
+
+    # --- фильтр по project_ids через EXISTS, чтобы избежать дубликатов ---
+    if filter.projects_ids:
+        mention_exists = (
+            select(literal(1))
+            .select_from(models.ProjectMention)
+            .where(
+                and_(
+                    models.ProjectMention.post_id == models.SocialPost.id,
+                    models.ProjectMention.project_id.in_(filter.projects_ids),
+                )
+            )
+            .exists()
+        )
+        query = query.where(mention_exists)
+
+    # --- фильтр по типу источников (привязан / не привязан к проекту) ---
+    if filter.include_project_sources != filter.include_other_sources:
+        account_link_exists = (
+            select(literal(1))
+            .select_from(models.ProjectAccountStatus)
+            .where(models.ProjectAccountStatus.account_id == models.SocialPost.account_id)
+            .exists()
+        )
+
+        if filter.include_project_sources:
+            query = query.where(account_link_exists)
+        else:
+            query = query.where(~account_link_exists)
+
+    # --- сортировка ---
+    if sort_type == enums.SortType.NEW:
+        query = query.order_by(desc(models.SocialPost.posted_at))
+    elif sort_type == enums.SortType.POPULAR:
+        # Коррелированный подзапрос: берём только одну – самую свежую – статистику для поста
+        latest_score_subq = (
+            select(
+                (
+                    func.coalesce(models.SocialPostStatistic.views, 0)
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 0.5
+                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
+                )
+            )
+            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
+            .order_by(desc(models.SocialPostStatistic.created_at))
+            .limit(1)
+            .scalar_subquery()
+        )
+
+        popularity_expr = func.coalesce(latest_score_subq, 0)
+        query = query.order_by(desc(popularity_expr))
+    else:
+        # На случай добавления новых типов сортировки в будущем
+        raise exceptions.BusinessError(code="invalid_sort_type", message="Invalid sort type")
+
+    # --- лимит ---
+    query = query.limit(limit)
+
+    # выполняем
+    result = db.execute(query).unique().scalars().all()
+    return result
+
+async def get_projects_all(db: Session) -> List[models.Project]:
+    stmt = select(models.Project)
+    return db.execute(stmt).scalars().all()
+
+async def get_projects_selected_by_user(user: models.User, db: Session) -> List[models.Project]:
+    stmt = (
+        select(models.Project)
+        .join(models.UserSelectedProject)
+        .where(models.UserSelectedProject.user_id == user.id)
+    )
+    return db.execute(stmt).scalars().all()
+
+async def select_projects(request: schemas.SelectProjectsRequest, user: models.User, db: Session) -> None:
+    """Обновляет список выбранных проектов для пользователя"""
+    # Удаляем все существующие выбранные проекты пользователя
+    stmt = delete(models.UserSelectedProject).where(
+        models.UserSelectedProject.user_id == user.id
+    )
+    db.execute(stmt)
+    
+    # Добавляем новые выбранные проекты
+    selected_projects = [
+        models.UserSelectedProject(
+            user_id=user.id,
+            project_id=project_id
+        )
+        for project_id in request.project_ids
+    ]
+    
+    db.add_all(selected_projects)
+    db.commit()
+    
+
+def create_or_update_project_by_name(session: Session, project: models.Project) -> models.Project:
+    """
+    Создает или обновляет проект по его имени.
+    Если проект с таким именем уже существует, обновляет его данные.
+    """
+    # Ищем проект по имени
+    stmt = select(models.Project).where(models.Project.name == project.name)
+    existing_project = session.execute(stmt).scalar_one_or_none()
+    
+    if existing_project:
+        # Обновляем существующий проект
+        existing_project.description = project.description
+        existing_project.url = project.url
+        existing_project.keywords = project.keywords
+        session.add(existing_project)
+        session.commit()
+        session.refresh(existing_project)
+        return existing_project
+    else:
+        # Создаем новый проект
+        session.add(project)
+        session.commit()
+        session.refresh(project)
+        return project
+
+def create_or_update_social_media_by_social_name(session: Session, account: models.SocialAccount) -> models.SocialAccount:
+    """
+    Создает или обновляет аккаунт социальной сети по его social_login.
+    Если аккаунт с таким social_login уже существует, обновляет его данные.
+    """
+    # Ищем аккаунт по social_login
+    stmt = select(models.SocialAccount).where(models.SocialAccount.social_login == account.social_login)
+    existing_account = session.execute(stmt).scalar_one_or_none()
+    
+    if existing_account:
+        # Обновляем существующий аккаунт
+        existing_account.name = account.name
+        existing_account.social_id = account.social_id
+        session.add(existing_account)
+        session.commit()
+        session.refresh(existing_account)
+        return existing_account
+    else:
+        # Создаем новый аккаунт
+        session.add(account)
+        session.commit()
+        session.refresh(account)
+        return account
+
+def create_or_update_project_account_status(
+    session: Session,
+    project_id: int,
+    account_id: int,
+    status_type: enums.ProjectAccountStatusType
+) -> models.ProjectAccountStatus:
+    """
+    Создает или обновляет связь между проектом и аккаунтом.
+    Если связь уже существует, обновляет тип связи.
+    """
+    # Ищем существующую связь
+    stmt = select(models.ProjectAccountStatus).where(
+        models.ProjectAccountStatus.project_id == project_id,
+        models.ProjectAccountStatus.account_id == account_id
+    )
+    existing_status = session.execute(stmt).scalar_one_or_none()
+    
+    if existing_status:
+        # Обновляем тип связи
+        existing_status.type = status_type
+        session.add(existing_status)
+        session.commit()
+        session.refresh(existing_status)
+        return existing_status
+    else:
+        # Создаем новую связь
+        status = models.ProjectAccountStatus(
+            project_id=project_id,
+            account_id=account_id,
+            type=status_type
+        )
+        session.add(status)
+        session.commit()
+        session.refresh(status)
+        return status
+
+async def delete_old_posts(db: Session, older_than_timestamp: int) -> int:
+    """
+    Удаляет все посты старше указанного timestamp.
+    
+    Args:
+        db: Сессия базы данных
+        older_than_timestamp: Timestamp, посты старше которого будут удалены
+        
+    Returns:
+        Количество удаленных постов
+    """
+    # Сначала удаляем связанные данные (статистику и упоминания)
+    # Получаем ID постов для удаления
+    posts_to_delete_stmt = select(models.SocialPost.id).where(
+        models.SocialPost.posted_at < older_than_timestamp
+    )
+    post_ids = db.execute(posts_to_delete_stmt).scalars().all()
+    
+    if not post_ids:
+        return 0
+    
+    # Удаляем статистику постов
+    delete_stats_stmt = delete(models.SocialPostStatistic).where(
+        models.SocialPostStatistic.post_id.in_(post_ids)
+    )
+    db.execute(delete_stats_stmt)
+    
+    # Удаляем упоминания проектов в постах
+    delete_mentions_stmt = delete(models.ProjectMention).where(
+        models.ProjectMention.post_id.in_(post_ids)
+    )
+    db.execute(delete_mentions_stmt)
+    
+    # Удаляем сами посты
+    delete_posts_stmt = delete(models.SocialPost).where(
+        models.SocialPost.posted_at < older_than_timestamp
+    )
+    result = db.execute(delete_posts_stmt)
+    
+    db.commit()
+    
+    return result.rowcount
+
+async def get_brain_settings(user: models.User, session: Session) -> schemas.PersonalizationSettings:
+    """
+    Получение настроек персонализации пользователя
+    """
+    if not user:
+        raise exceptions.UserNotFoundError()
+    
+    if user.personalization_brain_settings:
+        try:
+            # Используем безопасную схему для извлечения из базы данных
+            brain_settings_safe = schemas.PersonalizationSettingsSafe.model_validate(user.personalization_brain_settings)
+            logger.info(f"Retrieved brain settings for user {user.id}: {brain_settings_safe}")
+            
+            # Преобразуем в обычную схему для ответа (простое копирование полей)
+            return schemas.PersonalizationSettings.model_validate(brain_settings_safe.model_dump())
+        except Exception as e:
+            logger.warning(f"Error validating brain settings for user {user.id}: {e}")
+            # Возвращаем настройки по умолчанию при ошибке валидации
+            return schemas.PersonalizationSettings(
+                user_social_login="",
+                style=schemas.StyleSettings(),
+                content=schemas.ContentSettings()
+            )
+    else:
+        # Возвращаем настройки по умолчанию, если их нет в базе
+        return schemas.PersonalizationSettings(
+            user_social_login="",
+            style=schemas.StyleSettings(),
+            content=schemas.ContentSettings()
+        )
+
+
+async def set_brain_settings(
+    request: schemas.PersonalizationSettings,
+    user: models.User,
+    session: Session
+) -> schemas.PersonalizationSettings:
+    """
+    Установка настроек персонализации пользователя
+    """
+    if not user:
+        raise exceptions.UserNotFoundError()
+    
+    # Сохраняем настройки в базу данных
+    user.personalization_brain_settings = request.model_dump(mode="json")
+    logger.info(f"Updated brain settings for user {user.id}: {user.personalization_brain_settings}")
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    # Возвращаем сохраненные настройки
+    return await get_brain_settings(user, session)
+
+
+async def get_feed_templates(session: Session, projects_ids: Optional[List[int]] = None, limit: int = 50) -> List[schemas.PostExample]:
+    """
+    Получение шаблонов для auto-yaps по выбранным проектам.
+    Если projects_ids не указаны, возвращает шаблоны для всех проектов.
+    """
+    # Получаем шаблоны для выбранных проектов или для всех проектов
+    stmt = select(models.PostTemplate)
+    
+    # Если указаны конкретные проекты, фильтруем по ним
+    if projects_ids:
+        stmt = stmt.where(models.PostTemplate.project_id.in_(projects_ids))
+    
+    # Добавляем сортировку и лимит
+    stmt = stmt.order_by(desc(models.PostTemplate.created_at)).limit(limit)
+    
+    templates = session.execute(stmt).scalars().all()
+    
+    return [schemas.PostExample.model_validate(template) for template in templates]
+
+
+async def get_project_feed(project: models.Project, period_timestamp: int, session: Session) -> List[models.SocialPost]:
+    """
+    Получение ленты постов для выбранного проекта за указанный период
+    
+    Args:
+        project: Проект, для которого нужно получить посты
+        period_timestamp: Период в секундах (например, 86400 для последних 24 часов)
+        session: Сессия базы данных
+        
+    Returns:
+        Список постов, связанных с проектом за указанный период
+    """
+    latest_fresh_post_timestamp = utils_base.now_timestamp() - period_timestamp
+    
+    # Получаем все посты для выбранного проекта, учитывая, что проект и пост связаны через project_mention
+    stmt = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account),
+        )
+        .join(models.ProjectMention, models.ProjectMention.post_id == models.SocialPost.id)
+        .where(
+            models.ProjectMention.project_id == project.id,
+            models.SocialPost.posted_at >= latest_fresh_post_timestamp
+        )
+        .order_by(desc(models.SocialPost.posted_at))
+    )
+    
+    return session.execute(stmt).unique().scalars().all()
+
+
+async def create_post_examples(templates: List[schemas.PostExampleCreate], db: Session) -> List[schemas.PostExample]:
+    """
+    Создание шаблонных постов для юзера
+    """
+    # Создаем объекты модели
+    post_examples_db = []
+    for template in templates:
+        post_example_db = models.PostTemplate(
+            project_id=template.project_id,
+            post_text=template.post_text
+        )
+        db.add(post_example_db)
+        post_examples_db.append(post_example_db)
+    
+    # Сохраняем все объекты в базу данных
+    db.commit()
+    
+    # Обновляем объекты, чтобы получить сгенерированные поля (id, created_at)
+    for post_example_db in post_examples_db:
+        db.refresh(post_example_db)
+    
+    # Преобразуем в схемы
+    result: List[schemas.PostExample] = []
+    for post_example_db in post_examples_db:
+        result.append(schemas.PostExample.model_validate(post_example_db))
+    
+    return result
+

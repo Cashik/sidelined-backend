@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DB_PORT: str = "5432"
     DB_NAME: str = "2eden"
     
+    # Redis settings
+    REDIS_HOST: str = "sidelined_redis"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
+    
     # App settings
     SECRET_KEY: str = "your-secret-key"
     DEBUG: bool = True
@@ -46,6 +51,16 @@ class Settings(BaseSettings):
     
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
+    # Auto-Yap settings
+    # время, через которое происходит синхронизация данных с твиттером
+    POST_SYNC_PERIOD_SECONDS: int = 60 # каждые 10 минут
+    # Период времени, через который посты станут неактуальными и их нужно будет удалить
+    POST_INACTIVE_TIME_SECONDS: int = 60*60*24
+    # Период времени, через который система будет очищать старые посты
+    POST_CLEANUP_TIME_SECONDS: int = 60
+    # Период времени, через который система будет создавать авто-yaps (шаблоны постов)
+    AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60  # каждые 24 часа
+    
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
     
@@ -55,6 +70,9 @@ class Settings(BaseSettings):
     EXA_SEARCH_API_KEY: str | None = None
     
     ANKR_API_KEY: str
+    
+    X_RAPIDAPI_KEY: str
+    X_TWITTER_API_KEY: str
     
     @property
     def DATABASE_URL(self) -> str:
