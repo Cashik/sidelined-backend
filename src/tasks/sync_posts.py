@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from src.core.celery_app import celery_app
 from src.database import CelerySessionManager
 from src import models, utils, utils_base
-
+from src.config.settings import settings
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +26,7 @@ async def _sync_posts_async():
             return
 
         logger.info("sync_posts: start for %d projects", len(projects))
-        from_ts: int = utils_base.now_timestamp() - 3 * 24 * 60 * 60  # 3 дня назад
+        from_ts: int = utils_base.now_timestamp() - settings.POST_SYNC_PERIOD_SECONDS  # 3 дня назад
 
         for project in projects:
             try:

@@ -466,7 +466,11 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
     """
     # сервис для работы с x api
     x_api_service = XApiService()
-    query = f'{project.name} since:{from_timestamp}'
+    keywords = project.keywords.split(";")
+    keywords = [f'"{kw}"' for kw in keywords if kw]
+    keywords_query = " OR ".join(keywords)
+    query = f"({keywords_query}) min_faves:{settings.POST_SYNC_LIKES_COUNT_MINIMAL}"
+    tweets_added_count = 0
     
     try:
         # Получаем твитов сколько сможем
@@ -476,7 +480,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
             logger.info(f"No tweets found for project {project.name} with query {query}")
             return True
             
-        logger.info(f"Found {len(response.tweets)} tweets for project {project.name}")
+        logger.error(f"Found {len(response.tweets)} tweets for project {project.name}")
         
         for tweet in response.tweets:
             try:
@@ -497,6 +501,28 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                 
                 post_id = tweet.rest_id
                 post_db: models.SocialPost | None = await crud.get_social_post_by_id(post_id, db)
+                
+                # если пост недостаточно популярен, то пропускаем
+                post_shema = schemas.Post(
+                    text="",
+                    created_timestamp=0,
+                    full_post_json={},
+                    account_name="",
+                    account_projects_statuses=[],
+                    stats=schemas.PostStats(
+                        favorite_count=main_post_data.favorite_count,
+                        retweet_count=main_post_data.retweet_count,
+                        reply_count=main_post_data.reply_count,
+                        views_count=views
+                    )
+                ) # только для расчета показателя вовлеченности
+                post_engagement_score = calculate_post_engagement_score(post_shema)
+                logger.error(f"Post engagement:\n score: {post_engagement_score}\n post: {main_post_data.full_text} \n stats: {post_shema.stats}")
+                # TODO: включить позже
+                if post_engagement_score < settings.POST_SYNC_MINIMAL_ENGAGEMENT_SCORES and False:
+                    logger.error(f"Skipping tweet due to low engagement score: {main_post_data.full_text}")
+                    # пропускаем пост, не запоминаем его автора и статистику
+                    continue
                 
                 if not post_db:
                     # Проверяем наличие данных об источнике
@@ -545,6 +571,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                     views=views
                 )
                 await crud.create_social_post_statistic(post_stats_db, db)
+                tweets_added_count += 1
             except Exception as e:
                 logger.error(f"Error processing tweet: {str(e)}")
                 logger.error(f"Tweet data: {tweet}")
@@ -555,10 +582,11 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
         logger.error(f"Project: {project.name}, Query: {query}")
         return False
 
+    logger.error(f"Tweets added: {tweets_added_count}")
     return True
 
 
-def calculate_engagement_score(post: schemas.Post) -> float:
+def calculate_post_engagement_score(post: schemas.Post) -> float:
     """
     Расчет показателя вовлеченности поста.
     """
@@ -623,7 +651,7 @@ async def create_project_autoyaps(project: models.Project, db: Session) -> List[
     # преобразуем в схему
     project_feed = convert_posts_to_schemas(project_posts)
     # сортируем по убыванию популярности
-    project_feed.sort(key=lambda x: calculate_engagement_score(x), reverse=True)
+    project_feed.sort(key=lambda x: calculate_post_engagement_score(x), reverse=True)
     # убираем самые непопулярные посты
     project_feed = project_feed[:feed_limit]
     # сортируем еще раз по времени публикации 
@@ -644,7 +672,6 @@ async def create_project_autoyaps(project: models.Project, db: Session) -> List[
     # сохраняем шаблоны
     result = await crud.create_post_examples(templates, db)
     return result
-
 
 
 async def generate_pots_examples(generation_settings: schemas.AutoYapsGenerationSettings, count: int = 5) -> List[str]:

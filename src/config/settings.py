@@ -46,14 +46,20 @@ class Settings(BaseSettings):
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Auto-Yap settings
-    # время, через которое происходит синхронизация данных с твиттером
-    POST_SYNC_PERIOD_SECONDS: int = 60*10 # каждые 10 минут
+    POST_SYNC_UPDATE_PERIOD_SECONDS: int = 60*10 # период между синхронизациями данных с твиттером
+    POST_SYNC_PERIOD_SECONDS: int = 60*60*24 # период за который будут синхронизироваться посты (т.е. не старше 24 часов)
+    POST_SYNC_LIKES_COUNT_MINIMAL: int = 50 # минимальное количество лайков при запросе к твиттеру
+    POST_SYNC_MINIMAL_ENGAGEMENT_SCORES: int = 50 # минимальный порог вовлеченности для добавления в базу
+    
+    POST_FEED_MINIMAL_ENGAGEMENT_SCORES: int = 200 # минимальный порог вовлеченности поста для выдачи пользователю
+    
     # Период времени, через который посты станут неактуальными и их нужно будет удалить
     POST_INACTIVE_TIME_SECONDS: int = 60*60*24
     # Период времени, через который система будет очищать старые посты
     POST_CLEANUP_TIME_SECONDS: int = 60*60*24
     # Период времени, через который система будет создавать авто-yaps (шаблоны постов)
     AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60*30  # каждые 30 минут
+    
     
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours

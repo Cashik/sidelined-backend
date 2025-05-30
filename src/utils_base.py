@@ -20,7 +20,13 @@ def format_promo_code(code: str) -> str:
 
 
 def parse_date_to_timestamp(date: str) -> int:
-    return int(parsedate_to_datetime(date).timestamp())
+    try:
+        # Twitter формат: 'Fri May 30 08:13:53 +0000 2025'
+        return int(datetime.strptime(date, "%a %b %d %H:%M:%S %z %Y").timestamp())
+    except Exception:
+        # fallback на старый способ, если вдруг формат другой
+        from email.utils import parsedate_to_datetime
+        return int(parsedate_to_datetime(date).timestamp())
 
 def timestamp_to_X_date(timestamp: int) -> str:
     """

@@ -1,13 +1,18 @@
 import asyncio
 import argparse
+import logging
+import bcrypt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from src.database import SessionLocal
 from src.models import User, Project, AdminUser
 from src import crud, utils_base, enums, models, utils
 from src.config.projects import projects_all
-import logging
-import bcrypt
+
+from src.config.settings import settings
+
+logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +128,7 @@ async def sync_posts_async():
     try:
         # Получаем все проекты из базы данных
         projects = session.execute(select(models.Project)).scalars().all()
-        from_timestamp = utils_base.now_timestamp() - 3 * 24 * 60 * 60
+        from_timestamp = utils_base.now_timestamp() - settings.POST_SYNC_PERIOD_SECONDS
         # Для каждого проекта запускаем синхронизацию постов
         for project in projects:
             await utils.update_project_data(project, from_timestamp, session)

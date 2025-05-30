@@ -183,7 +183,7 @@ class XApiService:
         if not self.api_key:
             raise ValueError("X_RAPIDAPI_KEY environment variable is not set")
 
-    async def search(self, query: str = "from:* ", from_timestamp: int = None) -> FeedResponse:
+    async def search(self, query: str = "from:* ", from_timestamp: int = None, min_likes_count: int = None) -> FeedResponse:
         """
         Поиск постов в X (Twitter) за весь промежуток времени от указанной даты до текущей
         
@@ -199,8 +199,14 @@ class XApiService:
         logger.info(f"Searching for tweets from {from_timestamp} to {until_timestamp} with query: {query}")
         
         while True:
+            # собираем query - добавляем since и until
+            new_query = f"{query} since:{timestamp_to_X_date(from_timestamp)}"
+            if until_timestamp:
+                new_query += f" until:{timestamp_to_X_date(until_timestamp)}"
+            
             # получаем ленту
-            feed_response: GraphQLResponse = await self._get_serch_feed(query, from_timestamp, until_timestamp)
+            logger.info(f"Searching for tweets with query: {new_query}")
+            feed_response: GraphQLResponse = await self._get_serch_feed(new_query)
             
             # извлекаем твиты из ответа
             new_tweets, old_tweets_exist = self._extract_actual_tweets_from_feed(feed_response, from_timestamp)
@@ -213,8 +219,12 @@ class XApiService:
                 break
 
             # снижаем until_timestamp на время самого старого поста
-            until_timestamp = min(parse_date_to_timestamp(tweet.legacy.created_at) for tweet in new_tweets)
-            logger.info(f"Until timestamp changed to: {until_timestamp}")
+            min_timestamp = 999999999999999999
+            for tweet in new_tweets:
+                tweet_timestamp = parse_date_to_timestamp(tweet.legacy.created_at)
+                logger.info(f"Tweet with {tweet.legacy.created_at} timestamp: {tweet_timestamp}")
+                min_timestamp = min(min_timestamp, tweet_timestamp)
+            until_timestamp = min_timestamp
         
         logger.info(f"Found {len(tweets)} tweets")
         
@@ -228,7 +238,7 @@ class XApiService:
         
         return FeedResponse(tweets=tweets)
         
-    async def _get_serch_feed(self, query:str, from_timestamp: int, until_timestamp: int = None) -> GraphQLResponse:
+    async def _get_serch_feed(self, query:str) -> GraphQLResponse:
         """
         Получение ленты постов
         """
@@ -239,13 +249,10 @@ class XApiService:
         
         params = {
             'words': query,
-            'since': timestamp_to_X_date(from_timestamp),
             'resFormat': 'json',
             'apiKey': settings.X_TWITTER_API_KEY
         }
 
-        if until_timestamp:
-            params['until'] = timestamp_to_X_date(until_timestamp)
 
         response_json = None
         

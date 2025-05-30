@@ -85,7 +85,7 @@ def init_worker(**kwargs):
 celery_app.conf.beat_schedule = {
     "sync-posts": {
         "task": "src.tasks.sync_posts.sync_posts",
-        "schedule": settings.POST_SYNC_PERIOD_SECONDS,
+        "schedule": settings.POST_SYNC_UPDATE_PERIOD_SECONDS,
         "options": {"queue": "default"},
     },
     "cleanup-old-posts": {
