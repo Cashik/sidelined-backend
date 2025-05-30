@@ -663,6 +663,25 @@ async def get_posts(
         else:
             query = query.where(~account_link_exists)
 
+    # --- фильтр по engagement score ---
+    if filter.include_other_sources:
+        # Коррелированный подзапрос: берём только одну – самую свежую – статистику для поста
+        latest_score_subq = (
+            select(
+                (
+                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
+                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 3
+                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
+                )
+            )
+            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
+            .order_by(desc(models.SocialPostStatistic.created_at))
+            .limit(1)
+            .scalar_subquery()
+        )
+        query = query.where(latest_score_subq >= settings.POST_FEED_MINIMAL_ENGAGEMENT_SCORES)
+
     # --- сортировка ---
     if sort_type == enums.SortType.NEW:
         query = query.order_by(desc(models.SocialPost.posted_at))
