@@ -6,12 +6,19 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.orm import Session
 import asyncio
 from datetime import datetime
+from pydantic import BaseModel, Field
 
 from src import models, crud, schemas, enums, utils_base
 from src.config.settings import settings
 from src.database import get_session
-from src.providers.gemini import GeminiProvider, GeminiNotesResponse
+
 logger = logging.getLogger(__name__)
+
+
+class NotesResponse(BaseModel):
+    """Структура ответа для анализа заметок о пользователе"""
+    delete_notes: Optional[List[int]] = Field(default=None, description="List of note ids to delete")
+    new_notes: Optional[List[str]] = Field(default=None, description="List of new notes to add")
 
 
 async def update_user_information(user_id: int):
@@ -66,23 +73,24 @@ async def update_user_information(user_id: int):
         # Создаем системный промпт для модели
         system_prompt = create_system_prompt(user, messages_to_analyze)
         
-        # Отправляем запрос к модели Gemini
-        gemini_provider = GeminiProvider()
+        # Отправляем запрос к модели через langchain
         try:
-            gemini_response: GeminiNotesResponse = await gemini_provider.generate_notes_response(system_prompt)
+            notes_response: NotesResponse = await generate_notes_analysis(system_prompt)
         except Exception as e:
-            result["error"] = f"Failed to get response from Gemini model: {str(e)}"
+            result["error"] = f"Failed to get response from AI model: {str(e)}"
             logger.error(result["error"])
             return result
         
+        logger.info(f"Notes response: {notes_response}")
+        
         # Удаляем выбранные заметки
-        if gemini_response.delete_notes:
-            deleted_facts = await crud.delete_user_facts(user, gemini_response.delete_notes, session)
+        if notes_response.delete_notes:
+            deleted_facts = await crud.delete_user_facts(user, notes_response.delete_notes, session)
             result["deleted_notes"] = deleted_facts
         
         # Добавляем новые заметки
-        if gemini_response.new_notes:
-            _, added_facts = await crud.add_user_facts(user, gemini_response.new_notes, session)
+        if notes_response.new_notes:
+            _, added_facts = await crud.add_user_facts(user, notes_response.new_notes, session)
             result["added_notes"] = added_facts
         
         # Обновляем last_analysed_nonce для всех чатов с новыми сообщениями
@@ -113,6 +121,48 @@ async def update_user_information(user_id: int):
         session.close()
     
     return result
+
+
+async def generate_notes_analysis(system_prompt: str) -> NotesResponse:
+    """
+    Генерирует анализ заметок о пользователе через langchain.
+    
+    Args:
+        system_prompt: Системный промпт для анализа
+        
+    Returns:
+        NotesResponse с результатами анализа
+    """
+    from langchain.chat_models import init_chat_model
+    from pydantic import ValidationError
+    
+    # Определяем модель и провайдер (используем Gemini по умолчанию для анализа заметок)
+    model = enums.Model.GEMINI_2_5_PRO
+    model_provider = "google_genai"
+    api_key = settings.GEMINI_API_KEY
+    
+    # Инициализация LLM с structured output
+    llm = init_chat_model(
+        model=model.value,
+        model_provider=model_provider,
+        api_key=api_key,
+        temperature=0.1,  # Низкая температура для более точного анализа
+        max_tokens=1024,
+    ).with_structured_output(NotesResponse)
+    
+    try:
+        result: NotesResponse = await llm.ainvoke([
+            {"role": "user", "content": system_prompt}
+        ])
+        return result
+    except ValidationError as e:
+        logger.error(f"Validation error in notes analysis: {e}")
+        # Повторная попытка с более строгим промптом
+        strict_prompt = system_prompt + "\n\nIMPORTANT: Your response MUST be valid JSON that fully complies with the schema, otherwise an error will occur."
+        result: NotesResponse = await llm.ainvoke([
+            {"role": "user", "content": strict_prompt}
+        ])
+        return result
 
 def create_system_prompt(user: models.User, messages_to_analyze: List[models.Message]) -> str:
     """

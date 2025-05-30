@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     
     # Redis settings
     REDIS_URL: str
-    
     # Redis SSL settings (для managed Redis на облачных провайдерах)
     REDIS_SSL_CERT_REQS: str = "CERT_NONE"  # CERT_NONE, CERT_OPTIONAL, CERT_REQUIRED
     REDIS_SSL_CHECK_HOSTNAME: bool = False
@@ -28,6 +27,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key"
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
     
     # JWT settings
     JWT_SECRET_KEY: str = "your-secret-key"  # Default use main SECRET_KEY
@@ -35,29 +35,25 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60*24  # Default 24 hours
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # For future implementation refresh tokens
     
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://77.73.132.142,http://77.73.132.142:3000,http://localhost:5173,http://127.0.0.1:5173"
-
     # AI providers keys and settings
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     
     # Chat settings
-    DEFAULT_CREDITS: int = 100  # или любое другое дефолтное значение
-    DEFAULT_AI_MODEL: enums.Model = enums.Model.GPT_4O
+    DEFAULT_AI_MODEL_ID: enums.Model = enums.Model.GPT_4O
     
-    ALLOW_CHAT_WHEN_SERVER_IS_DOWN: bool = False
     
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Auto-Yap settings
     # время, через которое происходит синхронизация данных с твиттером
-    POST_SYNC_PERIOD_SECONDS: int = 60 # каждые 10 минут
+    POST_SYNC_PERIOD_SECONDS: int = 60*10 # каждые 10 минут
     # Период времени, через который посты станут неактуальными и их нужно будет удалить
     POST_INACTIVE_TIME_SECONDS: int = 60*60*24
     # Период времени, через который система будет очищать старые посты
-    POST_CLEANUP_TIME_SECONDS: int = 60
+    POST_CLEANUP_TIME_SECONDS: int = 60*60*24
     # Период времени, через который система будет создавать авто-yaps (шаблоны постов)
-    AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60  # каждые 24 часа
+    AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60*30  # каждые 30 минут
     
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
@@ -65,7 +61,6 @@ class Settings(BaseSettings):
     # MCP Servers and tools API keys
     EVM_AGENT_KIT_SSE_URL: str | None = None
     SMITHERY_API_KEY: str | None = None
-    EXA_SEARCH_API_KEY: str | None = None
     
     ANKR_API_KEY: str
     

@@ -70,7 +70,7 @@ class DeleteResponse(BaseModel):
 
 
 async def user_to_assistant_generate_data(user: models.User, create_message_request: UserMessageCreateRequest, chat: schemas.Chat) -> Tuple[schemas.AssistantGenerateData, schemas.ChatMessage]:
-    model = create_message_request.model or settings.DEFAULT_AI_MODEL
+    model = create_message_request.model or settings.DEFAULT_AI_MODEL_ID
     next_nonce = create_message_request.nonce if create_message_request.nonce else (max(chat.messages.keys()) if chat.messages else 0)
     user_new_message = schemas.ChatMessage(
         sender=enums.Role.USER,
@@ -151,7 +151,7 @@ async def get_all_chat_settings():
             ))
     
     return AllSettingsResponse(
-        default_chat_model_id=settings.DEFAULT_AI_MODEL,
+        default_chat_model_id=settings.DEFAULT_AI_MODEL_ID,
         chat_models=all_models,
         chat_styles=list(enums.ChatStyle),
         chat_details_levels=list(enums.ChatDetailsLevel),
