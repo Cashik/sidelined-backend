@@ -105,7 +105,9 @@ async def get_feed(
     # Преобразуем модели в схемы
     posts_schemas = utils.convert_posts_to_schemas(posts)
     
-    
+    # откидываем посты, у которых engagement score меньше 200
+    posts_schemas = [post for post in posts_schemas if utils.calculate_post_engagement_score(post) >= 200]
+
     response = schemas.GetFeedResponse(posts=posts_schemas)
     return response
 

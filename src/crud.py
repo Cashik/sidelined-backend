@@ -671,9 +671,10 @@ async def get_posts(
         latest_score_subq = (
             select(
                 (
-                    func.coalesce(models.SocialPostStatistic.views, 0)
-                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 0.5
+                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
                     + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
+                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
                 )
             )
             .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
