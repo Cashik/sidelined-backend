@@ -466,7 +466,7 @@ async def refresh_user_credits(db: Session, user: models.User):
     """
     Сбрасываем использованные кредиты пользователя если прошло больше 24 часов с последнего сброса
     """
-    if user.credits_last_reset is None or user.credits_last_reset < utils_base.now_timestamp() - 60*60*24:
+    if user.credits_last_update is None or user.credits_last_update < utils_base.now_timestamp() - 60*60*24:
         db.execute(
             update(models.User)
             .where(models.User.id == user.id)

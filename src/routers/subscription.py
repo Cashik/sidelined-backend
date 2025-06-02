@@ -30,7 +30,8 @@ async def get_subscription_plans():
 @router.post("/check", response_model=CurrentSubscribtion)
 async def get_user_subscribtion(
     user: models.User = Depends(get_current_user), 
-    subscribtion_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token)
+    subscribtion_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
+    db: Session = Depends(get_session)
     ):
     """
     Отдельный эндпоинт, который можно использовать для перепроверки баланса
@@ -39,6 +40,7 @@ async def get_user_subscribtion(
     """
     # TODO: уязвимое место для DoS атак
     user_plan = plans.get_subscription_plan(subscribtion_id)
+    await crud.refresh_user_credits(db, user)
     credits_left = max(0, user_plan.max_credits - user.used_credits_today)
     return CurrentSubscribtion(subscription_id=subscribtion_id, credits_left=credits_left)
 
