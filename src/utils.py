@@ -480,7 +480,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
             logger.info(f"No tweets found for project {project.name} with query {query}")
             return True
             
-        logger.error(f"Found {len(response.tweets)} tweets for project {project.name}")
+        logger.info(f"Found {len(response.tweets)} tweets for project {project.name}")
         
         for tweet in response.tweets:
             try:
@@ -517,7 +517,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                     )
                 ) # только для расчета показателя вовлеченности
                 post_engagement_score = calculate_post_engagement_score(post_shema)
-                logger.error(f"Post engagement:\n score: {post_engagement_score}\n post: {main_post_data.full_text} \n stats: {post_shema.stats}")
+                logger.info(f"Post engagement:\n score: {post_engagement_score}\n post: {main_post_data.full_text} \n stats: {post_shema.stats}")
                 # TODO: включить позже
                 if post_engagement_score < settings.POST_SYNC_MINIMAL_ENGAGEMENT_SCORES and False:
                     logger.error(f"Skipping tweet due to low engagement score: {main_post_data.full_text}")
@@ -582,7 +582,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
         logger.error(f"Project: {project.name}, Query: {query}")
         return False
 
-    logger.error(f"Tweets added: {tweets_added_count}")
+    logger.info(f"Tweets added: {tweets_added_count}")
     return True
 
 

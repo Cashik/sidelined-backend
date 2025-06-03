@@ -176,6 +176,9 @@ class UserProfileResponse(BaseModel):
 class XApiService:
     
     API_HOST = "twitter-api-v1-1-enterprise.p.rapidapi.com"
+    RETRAY_COUNT = 3
+    RETRAY_DELAY = 5
+    BASE_REQUEST_DELAY = 1
     
     def __init__(self):
         self.api_key = settings.X_RAPIDAPI_KEY
@@ -183,80 +186,46 @@ class XApiService:
         if not self.api_key:
             raise ValueError("X_RAPIDAPI_KEY environment variable is not set")
 
-    async def search(self, query: str = "from:* ", from_timestamp: int = None, min_likes_count: int = None) -> FeedResponse:
+    def extract_tweet_results_from_feed(self, feed_json: dict) -> list:
         """
-        Поиск постов в X (Twitter) за весь промежуток времени от указанной даты до текущей
-        
-        Args:
-            query: Поисковый запрос (по умолчанию возвращает все посты)
-        
-        Вызываем _get_feed всегда с указанным from_timestamp, 
-        но since_timestamp всегда снижаем как минимальную дату в поиске.
-        И так, пока не дойдем до текущей даты или посты не закончатся.
+        Извлекает только TweetResults (твиты) из json-ответа X API.
         """
-        until_timestamp = None
-        tweets = []
-        logger.info(f"Searching for tweets from {from_timestamp} to {until_timestamp} with query: {query}")
+        tweet_results = []
+        data = feed_json.get("data", {})
+        if isinstance(data, dict) and "data" in data:
+            data = data["data"]
+        instructions = data.get("search_by_raw_query", {}).get("search_timeline", {}).get("timeline", {}).get("instructions", [])
         
-        while True:
-            # собираем query - добавляем since и until
-            new_query = f"{query} since:{timestamp_to_X_date(from_timestamp)}"
-            if until_timestamp:
-                new_query += f" until:{timestamp_to_X_date(until_timestamp)}"
-            
-            # получаем ленту
-            logger.info(f"Searching for tweets with query: {new_query}")
-            feed_response: GraphQLResponse = await self._get_serch_feed(new_query)
-            
-            # извлекаем твиты из ответа
-            new_tweets, old_tweets_exist = self._extract_actual_tweets_from_feed(feed_response, from_timestamp)
-            logger.info(f"Found {len(new_tweets)} new tweets")
-            tweets.extend(new_tweets)
+        for instr in instructions:
+            for entry in instr.get("entries", []):
+                content = entry.get("content", {})
+                if content.get("entryType") == "TimelineTimelineItem":
+                    item_content = content.get("itemContent", {})
+                    tweet_results_json = item_content.get("tweet_results")
+                    if tweet_results_json:
+                        try:
+                            tweet_result = TweetResults(**tweet_results_json)
+                            tweet_results.append(tweet_result)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse TweetResults: {e}")
+        return tweet_results
 
-            # если хотябы один пост был выкинут или нет новых постов, то можно завершать цикл
-            # по логике не должно быть более старых постов, чем в from_timestamp, но лучше проверять
-            if old_tweets_exist or not new_tweets:
-                break
-
-            # снижаем until_timestamp на время самого старого поста
-            min_timestamp = 999999999999999999
-            for tweet in new_tweets:
-                tweet_timestamp = parse_date_to_timestamp(tweet.legacy.created_at)
-                logger.info(f"Tweet with {tweet.legacy.created_at} timestamp: {tweet_timestamp}")
-                min_timestamp = min(min_timestamp, tweet_timestamp)
-            until_timestamp = min_timestamp
-        
-        logger.info(f"Found {len(tweets)} tweets")
-        
-        # чисто проверка на дубликаты
-        tweets_ids = dict()
-        for tweet in tweets:
-            if tweet.rest_id in tweets_ids:
-                logger.error(f"Duplicate tweet found: {tweet.rest_id}")
-            else:
-                tweets_ids[tweet.rest_id] = tweet
-        
-        return FeedResponse(tweets=tweets)
-        
-    async def _get_serch_feed(self, query:str) -> GraphQLResponse:
+    async def _get_serch_feed(self, query:str, cursor: Optional[str] = None) -> Tuple[list, Optional[str]]:
         """
-        Получение ленты постов
+        Получение твитов (TweetResults) + извлечение курсора Bottom
         """
         headers = {
             'x-rapidapi-key': self.api_key,
             'x-rapidapi-host': self.API_HOST
         }
-        
         params = {
             'words': query,
             'resFormat': 'json',
-            'apiKey': settings.X_TWITTER_API_KEY
+            'apiKey': settings.X_TWITTER_API_KEY,
         }
-
-
+        if cursor:
+            params['cursor'] = cursor
         response_json = None
-        
-        # Используем контекстный менеджер для каждого запроса - просто и надежно
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
             connector=aiohttp.TCPConnector(limit=10, limit_per_host=5)
@@ -272,33 +241,91 @@ class XApiService:
                     logger.debug(f"Raw API response: {response_json}")
             except aiohttp.ClientError as e:
                 raise Exception(f"Error making request to X API: {str(e)}")
-            
         if not response_json:
             raise Exception("Empty response from API")
-            
         if isinstance(response_json, str):
             try:
                 response_json = json.loads(response_json)
             except json.JSONDecodeError as e:
-                raise Exception(f"Failed to parse API response as JSON: {str(e)}")
-            
+                raise Exception(f"Failed to parse API response as JSON: {str(e)} \n Response: {response_json}")
         if not isinstance(response_json, dict):
             raise Exception(f"Unexpected response format: {type(response_json)}")
-            
-        if "data" in response_json and isinstance(response_json["data"], dict):
-            response_json = response_json["data"]
-        else:
-            raise Exception(f"Unexpected data payload: {response_json}")
+        # Извлекаем твиты и курсор из исходного json
+        tweet_results = self.extract_tweet_results_from_feed(response_json)
+        bottom_cursor = self.extract_bottom_cursor_from_feed(response_json)
+        return tweet_results, bottom_cursor
+
+    async def search(self, query: str = "from:* ", from_timestamp: int = None, min_likes_count: int = None) -> FeedResponse:
+        """
+        Поиск постов в X (Twitter) начиная с from_timestamp (UNIX-время).
+        Использует курсор для пагинации, пока не встретит твиты старше from_timestamp или не закончится курсор.
+        """
+        tweets = []
+        seen_ids = set()
+        cursor = None
+        base_query = f"{query} since:{timestamp_to_X_date(from_timestamp)}"
+        logger.info(f"Searching for tweets from {from_timestamp} with query: {base_query}")
+
+        while True:
+            tweet_results, next_cursor = await self._get_serch_feed(base_query, cursor)
+            new_tweets = []
+            for tweet_result in tweet_results:
+                # tweet_result.result может быть TweetResult или UnknownTweetResult
+                tweet = tweet_result.result
+                # Нас интересуют только валидные твиты
+                if isinstance(tweet, TweetResult):
+                    if tweet.rest_id not in seen_ids:
+                        # Фильтрация по времени (на всякий случай)
+                        if parse_date_to_timestamp(tweet.legacy.created_at) >= from_timestamp:
+                            new_tweets.append(tweet)
+                            seen_ids.add(tweet.rest_id)
+            tweets.extend(new_tweets)
+            logger.info(f"Fetched {len(new_tweets)} new tweets, total: {len(tweets)}")
+            if not new_tweets:
+                logger.info("No new tweets found or all are duplicates/too old. Stopping.")
+                break
+            if not next_cursor:
+                logger.info("No next cursor. End of feed.")
+                break
+            cursor = next_cursor
+        return FeedResponse(tweets=tweets)
         
+    def extract_bottom_cursor_from_feed(self, feed_json: dict) -> Optional[str]:
+        """
+        Извлекает значение курсора Bottom из json-ответа X API (ищет во всех entries всех instructions).
+        """
         try:
-            data = GraphQLResponse(**response_json)
-            return data
+            data = feed_json.get("data", {})
+            if isinstance(data, dict) and "data" in data:
+                data = data["data"]
+            raw_query = data.get("search_by_raw_query", {})
+            search_timeline = raw_query.get("search_timeline", {})
+            timeline = search_timeline.get("timeline", {})
+            instructions = timeline.get("instructions", [])
+            logger.info(f"Instructions: {str(instructions)[:100]}")
+            for instr in instructions:
+                entries = instr.get("entries", [])
+                for entry in entries:
+                    content = entry.get("content", {})
+                    # Иногда курсор лежит прямо в entry.content
+                    if (
+                        content.get("entryType") == "TimelineTimelineCursor"
+                        and content.get("cursorType") == "Bottom"
+                        and "value" in content
+                    ):
+                        logger.info(f"Found bottom cursor in entry.content: {content['value']}")
+                        return content["value"]
+            # Иногда курсор лежит прямо в entries (без content)
+            for instr in instructions:
+                entry = instr.get("entry", {})
+                entry_content = entry.get("content", {})
+                if entry_content.get("cursorType") == "Bottom" and "value" in entry_content:
+                    logger.info(f"Found bottom cursor in entries: {entry_content['value']}")
+                    return entry_content["value"]
         except Exception as e:
-            logger.error(f"Failed to parse response as GraphQLResponse: {str(e)}")
-            logger.error(f"Response data: {response_json}")
-            raise Exception(f"Failed to parse API response: {str(e)}")
-    
-    
+            logger.warning(f"Failed to extract bottom cursor: {e}")
+        return None
+
     def _extract_actual_tweets_from_feed(self, feed_response: GraphQLResponse, from_timestamp: int) -> Tuple[List[TweetResult], bool]:
         """
         Извлечение актуальных постов из ленты
@@ -309,8 +336,7 @@ class XApiService:
         try:
             entries: List[Entry] = feed_response.data.search_by_raw_query.search_timeline.timeline.instructions[0].entries
         except (AttributeError, IndexError) as e:
-            logger.error(f"Error accessing entries in feed response: {e}")
-            logger.error(f"Feed response structure: {feed_response}")
+            logger.error(f"Error accessing entries in feed response: {e} \n Feed response: {feed_response}")
             return [], False
         
         for entry in entries:
@@ -344,8 +370,7 @@ class XApiService:
                 tweets.append(tweet_result)
                     
             except Exception as e:
-                logger.error(f"Error processing entry {entry.entryId}: {e}")
-                logger.error(f"Entry data: {entry}")
+                logger.error(f"Error processing entry {entry.entryId}: {e} \n Entry: {entry}")
                 continue
             
         return tweets, old_tweets_exist
