@@ -5,6 +5,7 @@ import aiohttp
 from pydantic import BaseModel, Field
 import logging
 import json
+import asyncio
 
 from src.config.settings import settings
 from src.utils_base import parse_date_to_timestamp, timestamp_to_X_date
@@ -255,27 +256,51 @@ class XApiService:
         bottom_cursor = self.extract_bottom_cursor_from_feed(response_json)
         return tweet_results, bottom_cursor
 
+    async def _get_serch_feed_with_retry(self, query: str, cursor: Optional[str] = None) -> Tuple[list, Optional[str]]:
+        """
+        Обёртка над _get_serch_feed с retry-логикой и задержками.
+        """
+        last_exception = None
+        for attempt in range(1, self.RETRAY_COUNT + 1):
+            try:
+                result = await self._get_serch_feed(query, cursor)
+                if attempt > 1:
+                    logger.info(f"_get_serch_feed succeeded on retry {attempt}")
+                return result
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"_get_serch_feed failed (attempt {attempt}/{self.RETRAY_COUNT}): {e}")
+                await asyncio.sleep(self.RETRAY_DELAY)
+        logger.error(f"_get_serch_feed failed after {self.RETRAY_COUNT} attempts: {last_exception}")
+        raise last_exception
+
     async def search(self, query: str = "from:* ", from_timestamp: int = None, min_likes_count: int = None) -> FeedResponse:
         """
         Поиск постов в X (Twitter) начиная с from_timestamp (UNIX-время).
         Использует курсор для пагинации, пока не встретит твиты старше from_timestamp или не закончится курсор.
+        Стабильная версия: retry, задержки, возврат частичных данных при ошибках.
         """
         tweets = []
         seen_ids = set()
         cursor = None
         base_query = f"{query} since:{timestamp_to_X_date(from_timestamp)}"
         logger.info(f"Searching for tweets from {from_timestamp} with query: {base_query}")
-
+        had_success = False
         while True:
-            tweet_results, next_cursor = await self._get_serch_feed(base_query, cursor)
+            try:
+                tweet_results, next_cursor = await self._get_serch_feed_with_retry(base_query, cursor)
+            except Exception as e:
+                if tweets:
+                    logger.error(f"Search stopped due to error after partial success: {e}")
+                    break
+                else:
+                    logger.error(f"Search failed with no data: {e}")
+                    raise
             new_tweets = []
             for tweet_result in tweet_results:
-                # tweet_result.result может быть TweetResult или UnknownTweetResult
                 tweet = tweet_result.result
-                # Нас интересуют только валидные твиты
                 if isinstance(tweet, TweetResult):
                     if tweet.rest_id not in seen_ids:
-                        # Фильтрация по времени (на всякий случай)
                         if parse_date_to_timestamp(tweet.legacy.created_at) >= from_timestamp:
                             new_tweets.append(tweet)
                             seen_ids.add(tweet.rest_id)
@@ -288,6 +313,7 @@ class XApiService:
                 logger.info("No next cursor. End of feed.")
                 break
             cursor = next_cursor
+            await asyncio.sleep(self.BASE_REQUEST_DELAY)
         return FeedResponse(tweets=tweets)
         
     def extract_bottom_cursor_from_feed(self, feed_json: dict) -> Optional[str]:
