@@ -274,6 +274,7 @@ class ProjectAdmin(BaseProtectedView):
         StringField("name", label="Project Name", required=True, help_text="Name of the project"),
         TextAreaField("description", label="Description", required=False, help_text="Project description"),
         StringField("url", label="Project URL", required=False, help_text="Official project website"),
+        StringField("icon_url", label="Icon URL", required=False, help_text="Icon URL of the project (can be taken from the coingecko.com or oficial site)."),
         TextAreaField("keywords", label="Keywords", required=True, help_text="Search keywords (; separated). Example: 'keyword1;key word2;@keyword3'"),
         HasMany("accounts", label="Related Accounts", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),

@@ -30,6 +30,7 @@ class Project(BaseModel):
     name: str
     description: Optional[str] = None
     url: Optional[str] = None
+    icon_url: str = ""
 
 class GetProjectsResponse(BaseModel):
     projects: List[Project]
@@ -41,7 +42,7 @@ async def get_projects(db: Session = Depends(get_session)):
     Получение списка всех отслеживаемых проектов приложения
     """
     projects_db: List[models.Project] = await crud.get_projects_all(db)
-    projects = [Project(id=project.id, name=project.name, description=project.description, url=project.url) for project in projects_db]
+    projects = [Project(id=project.id, name=project.name, description=project.description, url=project.url, icon_url=project.icon_url) for project in projects_db]
     return GetProjectsResponse(projects=projects)
 
 
@@ -51,7 +52,7 @@ async def get_selected_projects(user: models.User = Depends(get_current_user), d
     Получение списка отслеживаемых проектов для конкретного пользователя
     """
     projects_db: List[models.Project] = await crud.get_projects_selected_by_user(user, db)
-    projects = [Project(id=project.id, name=project.name, description=project.description, url=project.url) for project in projects_db]
+    projects = [Project(id=project.id, name=project.name, description=project.description, url=project.url, icon_url=project.icon_url) for project in projects_db]
     return GetProjectsResponse(projects=projects)
 
 

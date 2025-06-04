@@ -146,6 +146,7 @@ class Project(Base):
     description = Column(String, nullable=True)
     url = Column(String, nullable=True)
     
+    icon_url = Column(String, nullable=False, default="", server_default="")
     keywords = Column(String, nullable=False)
     
     # Relationships
