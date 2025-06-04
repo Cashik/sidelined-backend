@@ -19,14 +19,15 @@ class UserLegacy(BaseModel):
     followers_count: int
     profile_image_url_https: str
 
-
+    model_config = {"extra": "allow"}
 
 class User(BaseModel):
     """`core › user_results › result`"""
     rest_id: str
     legacy: UserLegacy
 
-
+    model_config = {"extra": "allow"}
+    
 class TweetLegacy(BaseModel):
     id_str: str
     full_text: str
@@ -35,21 +36,30 @@ class TweetLegacy(BaseModel):
     retweet_count: int
     reply_count: int
     lang: str
+    
+    # сюда подтягиваются поля из JSON для проверки reply/quote
+    in_reply_to_status_id_str: Optional[str] = None
+    in_reply_to_user_id_str: Optional[str] = None
+    is_quote_status: bool = False
 
-
-
+    model_config = {"extra": "allow"}
+    
 class TweetViews(BaseModel):
     count: Optional[str] = None
     state: str
 
-
+    model_config = {"extra": "allow"}
+    
 class UserResults(BaseModel):
     """`core › user_results` wrapper"""
     result: User
 
-
+    model_config = {"extra": "allow"}
+    
 class TweetCore(BaseModel):
     user_results: UserResults
+    
+    model_config = {"extra": "allow"}
 
 
 class TweetResult(BaseModel):
@@ -59,6 +69,25 @@ class TweetResult(BaseModel):
     legacy: TweetLegacy
     views: Optional[TweetViews] = None
 
+    # Здесь добавляем поля из JSON, которые указывают на ретвит или цитату:
+    retweeted_status_result: Optional["TweetResults"] = None
+    quoted_status_result: Optional["TweetResults"] = None
+    
+    model_config = {"extra": "allow"}
+
+    def is_retweet(self) -> bool:
+        return self.retweeted_status_result is not None
+
+    def is_reply(self) -> bool:
+        # reply ⇔ legacy.in_reply_to_status_id_str не None
+        return self.legacy.in_reply_to_status_id_str is not None
+
+    def is_quote(self) -> bool:
+        # quote ⇔ legacy.is_quote_status=True (часто вместе с наличием quoted_status_result)
+        return self.legacy.is_quote_status
+
+    def is_original(self) -> bool:
+        return not (self.is_retweet() or self.is_reply() or self.is_quote())
 
 class UnknownTweetResult(BaseModel):
     """Заглушка для твитов без обязательных полей (rest_id / core / legacy)."""
@@ -74,13 +103,13 @@ class TweetResults(BaseModel):
 
     result: Union[TweetResult, UnknownTweetResult]
 
-
+    model_config = {"extra": "allow"}
 class ItemContent(BaseModel):
     """`content › itemContent`"""
     itemType: str = Field(..., alias="itemType")
     tweet_results: TweetResults
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "allow"}
 
 
 class EntryContent(BaseModel):
@@ -88,7 +117,7 @@ class EntryContent(BaseModel):
     entryType: str = Field(..., alias="entryType")
     itemContent: Optional[ItemContent] = None
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "allow"}
 
 
 class Entry(BaseModel):
@@ -96,12 +125,14 @@ class Entry(BaseModel):
     sortIndex: str
     content: EntryContent
 
-
+    model_config = {"populate_by_name": True, "extra": "allow"}
+    
 class Instruction(BaseModel):
     type: str
     entries: List[Entry]
 
-
+    model_config = {"populate_by_name": True, "extra": "allow"}
+    
 class Timeline(BaseModel):
     instructions: List[Instruction]
 
@@ -173,6 +204,10 @@ class UserProfileResponse(BaseModel):
     result: Optional[Any] = None
     msg: str
 
+# После того как все классы объявлены, «связываем» forward ref:
+TweetResult.model_rebuild()
+TweetResults.model_rebuild()
+
 
 class XApiService:
     
@@ -239,7 +274,7 @@ class XApiService:
                 ) as response:
                     response.raise_for_status()
                     response_json = await response.json()
-                    logger.debug(f"Raw API response: {response_json}")
+                    logger.info(f"Raw API response: {response_json}")
             except aiohttp.ClientError as e:
                 raise Exception(f"Error making request to X API: {str(e)}")
         if not response_json:
@@ -283,7 +318,7 @@ class XApiService:
         tweets = []
         seen_ids = set()
         cursor = None
-        base_query = f"{query} since:{timestamp_to_X_date(from_timestamp)}"
+        base_query = f"{query} since:{timestamp_to_X_date(from_timestamp)} lang:en"
         logger.info(f"Searching for tweets from {from_timestamp} with query: {base_query}")
         had_success = False
         while True:
@@ -296,14 +331,18 @@ class XApiService:
                 else:
                     logger.error(f"Search failed with no data: {e}")
                     raise
+            logger.info(f"Tweet results count: {len(tweet_results)}")
             new_tweets = []
             for tweet_result in tweet_results:
                 tweet = tweet_result.result
                 if isinstance(tweet, TweetResult):
+                    logger.info(f"Tweet: {tweet}")
                     if tweet.rest_id not in seen_ids:
                         if parse_date_to_timestamp(tweet.legacy.created_at) >= from_timestamp:
                             new_tweets.append(tweet)
                             seen_ids.add(tweet.rest_id)
+                    else:
+                        logger.info(f"Tweet already seen: {tweet.rest_id}")
             tweets.extend(new_tweets)
             logger.info(f"Fetched {len(new_tweets)} new tweets, total: {len(tweets)}")
             if not new_tweets:

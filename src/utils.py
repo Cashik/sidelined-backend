@@ -471,6 +471,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
     keywords_query = " OR ".join(keywords)
     query = f"({keywords_query}) min_faves:{settings.POST_SYNC_LIKES_COUNT_MINIMAL}"
     tweets_added_count = 0
+    tweets_skipped_count = 0
     
     try:
         # Получаем твитов сколько сможем
@@ -487,6 +488,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                 # Проверяем наличие необходимых полей
                 if not hasattr(tweet, 'legacy') or not hasattr(tweet, 'rest_id'):
                     logger.warning(f"Skipping tweet due to missing required fields: {tweet}")
+                    tweets_skipped_count += 1
                     continue
 
                 main_post_data = tweet.legacy
@@ -522,6 +524,14 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
                 if post_engagement_score < settings.POST_SYNC_MINIMAL_ENGAGEMENT_SCORES and False:
                     logger.error(f"Skipping tweet due to low engagement score: {main_post_data.full_text}")
                     # пропускаем пост, не запоминаем его автора и статистику
+                    tweets_skipped_count += 1
+                    continue
+                
+                logger.info(f"Is retweet: {tweet.is_retweet()} Is quote: {tweet.is_quote()} Is reply: {tweet.is_reply()} Is original: {tweet.is_original()}")
+                
+                if not (tweet.is_quote() or tweet.is_original()):
+                    logger.info(f"Skipping post!")
+                    tweets_skipped_count += 1
                     continue
                 
                 if not post_db:
@@ -582,7 +592,7 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
         logger.error(f"Project: {project.name}, Query: {query}")
         return False
 
-    logger.info(f"Tweets added: {tweets_added_count}")
+    logger.info(f"Tweets added: {tweets_added_count}, skipped: {tweets_skipped_count}")
     return True
 
 
