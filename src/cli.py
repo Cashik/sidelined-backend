@@ -131,7 +131,10 @@ async def sync_posts_async():
         from_timestamp = utils_base.now_timestamp() - settings.POST_SYNC_PERIOD_SECONDS
         # Для каждого проекта запускаем синхронизацию постов
         for project in projects:
-            await utils.update_project_data(project, from_timestamp, session)
+            logger.info(f"sync_posts: project={project.name} start")
+            feed_sync = await utils.update_project_feed(project, from_timestamp, session)
+            news_sync = await utils.update_project_news(project, from_timestamp, session)
+            logger.info(f"sync_posts: project={project.name} done => news_sync={news_sync}")
     finally:
         session.close()
 

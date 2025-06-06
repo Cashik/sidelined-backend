@@ -456,7 +456,40 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
 from src.services.x_api_service import *
 
 
-async def update_project_data(project: models.Project, from_timestamp: int, db: Session) -> bool:
+async def update_project_feed(project: models.Project, from_timestamp: int, db: Session) -> bool:
+    """
+    Обновление фида проекта.
+    Тут нам важно, чтобы в твите было упоминание проекта и твит имел достаточное количество лайков.
+    """
+    keywords = project.keywords.split(";")
+    keywords = [f'"{kw}"' for kw in keywords if kw]
+    keywords_query = " OR ".join(keywords)
+    query = f"({keywords_query}) min_faves:{settings.POST_SYNC_LIKES_COUNT_MINIMAL}"
+    return await _update_posts_data(project.id, query, from_timestamp, db)
+
+async def update_project_news(project: models.Project, from_timestamp: int, db: Session) -> bool:
+    """
+    Обновление новостей проекта.
+    Тут нам важно только чтобы твит был от связанного аккаунта проекта.
+    """
+    logins = []
+    for account in project.accounts:
+        logins.append(f"from:{account.account.social_login}")
+    
+    logins_query = " OR ".join(logins)
+    if len(logins) == 0:
+        logger.info(f"update_project_news: no accounts found for project {project.id}")
+        return True
+    elif len(logins) == 1:
+        query = f"{logins_query}"
+    else:
+        query = f"({logins_query})"
+    
+    logger.info(f"update_project_news query: {query}")
+    return await _update_posts_data(project.id, query, from_timestamp, db)
+
+
+async def _update_posts_data(project_id: int, query: str, from_timestamp: int, db: Session) -> bool:
     """
     Обновление данных проекта.
     
@@ -464,136 +497,126 @@ async def update_project_data(project: models.Project, from_timestamp: int, db: 
     
     from_timestamp - timestamp в секундах, с которого нужно искать твиты. Это либо время создания проекта, либо максимальный срок, который мы учитываем в статистике.
     """
-    # сервис для работы с x api
-    x_api_service = XApiService()
-    keywords = project.keywords.split(";")
-    keywords = [f'"{kw}"' for kw in keywords if kw]
-    keywords_query = " OR ".join(keywords)
-    query = f"({keywords_query}) min_faves:{settings.POST_SYNC_LIKES_COUNT_MINIMAL}"
+
     tweets_added_count = 0
     tweets_skipped_count = 0
     
+    # добавляем фильтр по типу
+    query += f" -filter:replies"
+    
     try:
-        # Получаем твитов сколько сможем
+        # сервис для работы с x api
+        x_api_service = XApiService()
+        # получаем твиты
         response: XApiService.FeedResponse = await x_api_service.search(query, from_timestamp)
         
         if not response or not response.tweets:
-            logger.info(f"No tweets found for project {project.name} with query {query}")
+            logger.info(f"No tweets found for query {query}")
             return True
-            
-        logger.info(f"Found {len(response.tweets)} tweets for project {project.name}")
-        
-        for tweet in response.tweets:
-            try:
-                # Проверяем наличие необходимых полей
-                if not hasattr(tweet, 'legacy') or not hasattr(tweet, 'rest_id'):
-                    logger.warning(f"Skipping tweet due to missing required fields: {tweet}")
-                    tweets_skipped_count += 1
-                    continue
-
-                main_post_data = tweet.legacy
-                # Получаем количество просмотров, если они есть, иначе 0
-                views = 0
-                if hasattr(tweet, 'views') and tweet.views and hasattr(tweet.views, 'count') and tweet.views.count is not None:
-                    try:
-                        views = int(tweet.views.count)
-                    except (ValueError, TypeError):
-                        logger.warning(f"Could not convert views count to integer: {tweet.views.count}")
-                        views = 0
-                
-                post_id = tweet.rest_id
-                post_db: models.SocialPost | None = await crud.get_social_post_by_id(post_id, db)
-                
-                # если пост недостаточно популярен, то пропускаем
-                post_shema = schemas.Post(
-                    text="",
-                    created_timestamp=0,
-                    full_post_json={},
-                    account_name="",
-                    account_projects_statuses=[],
-                    stats=schemas.PostStats(
-                        favorite_count=main_post_data.favorite_count,
-                        retweet_count=main_post_data.retweet_count,
-                        reply_count=main_post_data.reply_count,
-                        views_count=views
-                    )
-                ) # только для расчета показателя вовлеченности
-                post_engagement_score = calculate_post_engagement_score(post_shema)
-                logger.info(f"Post engagement:\n score: {post_engagement_score}\n post: {main_post_data.full_text} \n stats: {post_shema.stats}")
-                # TODO: включить позже
-                if post_engagement_score < settings.POST_SYNC_MINIMAL_ENGAGEMENT_SCORES and False:
-                    logger.error(f"Skipping tweet due to low engagement score: {main_post_data.full_text}")
-                    # пропускаем пост, не запоминаем его автора и статистику
-                    tweets_skipped_count += 1
-                    continue
-                
-                logger.info(f"Is retweet: {tweet.is_retweet()} Is quote: {tweet.is_quote()} Is reply: {tweet.is_reply()} Is original: {tweet.is_original()}")
-                
-                if not (tweet.is_quote() or tweet.is_original()):
-                    logger.info(f"Skipping post!")
-                    tweets_skipped_count += 1
-                    continue
-                
-                if not post_db:
-                    # Проверяем наличие данных об источнике
-                    if not hasattr(tweet, 'core') or not hasattr(tweet.core, 'user_results') or not hasattr(tweet.core.user_results, 'result'):
-                        logger.warning(f"Skipping tweet due to missing source data: {tweet}")
-                        continue
-
-                    source_id = tweet.core.user_results.result.rest_id
-                    source_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
-                    if not source_db:
-                        # создаем источник
-                        source_data: XApiService.User = tweet.core.user_results.result
-                        if not hasattr(source_data, 'legacy'):
-                            logger.warning(f"Skipping tweet due to missing source legacy data: {source_data}")
-                            continue
-
-                        source_db = models.SocialAccount(
-                            social_id=source_id,
-                            name=source_data.legacy.name,
-                            social_login=source_data.legacy.screen_name,
-                        )
-                        source_db = await crud.create_social_account(source_db, db)
-
-                    # Преобразуем строку даты в timestamp
-                    posted_at_timestamp = parse_date_to_timestamp(main_post_data.created_at)
-                    
-                    # создаем пост
-                    post_db = models.SocialPost(
-                        social_id=post_id,
-                        account_id=source_db.id,
-                        text=main_post_data.full_text,
-                        posted_at=posted_at_timestamp,
-                        raw_data=tweet.model_dump(mode="json")
-                    )
-                    post_db = await crud.create_social_post(post_db, db)
-
-                # создаем связь между постом и проектом, если ее еще не существует
-                await crud.create_or_deny_project_post_mention(project.id, post_db.id, db)
-                
-                # сохраняем статистику поста
-                post_stats_db = models.SocialPostStatistic(
-                    post_id=post_db.id,
-                    likes=main_post_data.favorite_count,
-                    comments=main_post_data.reply_count,
-                    reposts=main_post_data.retweet_count,
-                    views=views
-                )
-                await crud.create_social_post_statistic(post_stats_db, db)
-                tweets_added_count += 1
-            except Exception as e:
-                logger.error(f"Error processing tweet: {str(e)}")
-                logger.error(f"Tweet data: {tweet}")
-                continue
-
     except Exception as e:
-        logger.error(f"Error fetching tweets: {str(e)}")
-        logger.error(f"Project: {project.name}, Query: {query}")
+        logger.error(f"Error fetching tweets: {str(e)} for query {query}")
         return False
+    
+    logger.info(f"Found {len(response.tweets)} tweets for query {query}")
+    
+    for tweet in response.tweets:
+        try:
+            # Проверяем наличие необходимых полей 
+            #     if not hasattr(post, 'legacy') or not hasattr(post, 'rest_id'):
+            if not hasattr(tweet, 'legacy') or not hasattr(tweet, 'rest_id'):
+                logger.warning(f"Skipping tweet due to missing required fields: {tweet}")
+                continue
+            
+            # пропускаем невалидные посты
+            if not _post_is_valid(tweet):
+                logger.info(f"Skipping. post: {str(tweet.legacy.full_text)[:100]} Is retweet: {tweet.is_retweet()} Is quote: {tweet.is_quote()} Is reply: {tweet.is_reply()} Is original: {tweet.is_original()}")
+                tweets_skipped_count += 1
+                continue
+            
+            # сохраняем пост и его статистику
+            await _update_post_data(tweet, project_id, db)
+            tweets_added_count += 1
+        except Exception as e:
+            logger.error(f"Error processing tweet: {str(e)}")
+            logger.error(f"Tweet data: {tweet}")
+            continue
 
     logger.info(f"Tweets added: {tweets_added_count}, skipped: {tweets_skipped_count}")
     return True
+
+def _post_is_valid(post: x_api_service.TweetResult) -> bool:
+    """
+    Проверка поста.
+    """    
+    if post.is_quote() or post.is_original():
+        return True
+    return False
+
+
+async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db: Session):
+    """
+    Обновление данных поста.
+    """
+    post_id = post.rest_id
+    post_db: models.SocialPost | None = await crud.get_social_post_by_id(post_id, db)
+    main_post_data = post.legacy
+    views = 0
+    if hasattr(post, 'views') and post.views and hasattr(post.views, 'count') and post.views.count is not None:
+        try:
+            views = int(post.views.count)
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert views count to integer: {post.views.count}")
+            views = 0
+    if not post_db:
+        # Проверяем наличие данных об источнике
+        if not hasattr(post, 'core') or not hasattr(post.core, 'user_results') or not hasattr(post.core.user_results, 'result'):
+            logger.warning(f"Skipping tweet due to missing source data: {post}")
+            return
+
+        source_id = post.core.user_results.result.rest_id
+        source_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
+        if not source_db:
+            # создаем источник
+            source_data: XApiService.User = post.core.user_results.result
+            if not hasattr(source_data, 'legacy'):
+                logger.warning(f"Skipping tweet due to missing source legacy data: {source_data}")
+                return
+
+            source_db = models.SocialAccount(
+                social_id=source_id,
+                name=source_data.legacy.name,
+                social_login=source_data.legacy.screen_name,
+            )
+            source_db = await crud.create_social_account(source_db, db)
+
+        # Преобразуем строку даты в timestamp
+        posted_at_timestamp = parse_date_to_timestamp(main_post_data.created_at)
+        
+        # создаем пост
+        post_db = models.SocialPost(
+            social_id=post_id,
+            account_id=source_db.id,
+            text=main_post_data.full_text,
+            posted_at=posted_at_timestamp,
+            raw_data=post.model_dump(mode="json")
+        )
+        post_db = await crud.create_social_post(post_db, db)
+
+    # создаем связь между постом и проектом, если ее еще не существует
+    await crud.create_or_deny_project_post_mention(project_id, post_db.id, db)
+    
+    # сохраняем статистику поста
+    post_stats_db = models.SocialPostStatistic(
+        post_id=post_db.id,
+        likes=main_post_data.favorite_count,
+        comments=main_post_data.reply_count,
+        reposts=main_post_data.retweet_count,
+        views=views
+    )
+    await crud.create_social_post_statistic(post_stats_db, db)
+    return
+
+
 
 
 def calculate_post_engagement_score(post: schemas.Post) -> float:

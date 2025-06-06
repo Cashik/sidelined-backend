@@ -31,8 +31,9 @@ async def _sync_posts_async():
         for project in projects:
             try:
                 logger.info("sync_posts: project=%s", project.name)
-                result = await utils.update_project_data(project, from_ts, db)
-                logger.info("sync_posts: project=%s done => %s", project.name, result)
+                feed_sync = await utils.update_project_feed(project, from_ts, db)
+                news_sync = await utils.update_project_news(project, from_ts, db)
+                logger.info("sync_posts: project=%s done => feed_sync=%s, news_sync=%s", project.name, feed_sync, news_sync)
             except Exception as e:
                 logger.error("sync_posts: error on project %s: %s", project.name, e, exc_info=True)
                 continue  # переходим к следующему проекту

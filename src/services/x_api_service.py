@@ -274,7 +274,7 @@ class XApiService:
                 ) as response:
                     response.raise_for_status()
                     response_json = await response.json()
-                    logger.info(f"Raw API response: {response_json}")
+                    #logger.info(f"Raw API response: {response_json}")
             except aiohttp.ClientError as e:
                 raise Exception(f"Error making request to X API: {str(e)}")
         if not response_json:
@@ -336,7 +336,7 @@ class XApiService:
             for tweet_result in tweet_results:
                 tweet = tweet_result.result
                 if isinstance(tweet, TweetResult):
-                    logger.info(f"Tweet: {tweet}")
+                    #logger.info(f"Tweet: {tweet}")
                     if tweet.rest_id not in seen_ids:
                         if parse_date_to_timestamp(tweet.legacy.created_at) >= from_timestamp:
                             new_tweets.append(tweet)
