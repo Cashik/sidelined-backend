@@ -1010,3 +1010,109 @@ async def create_post_examples(templates: List[schemas.PostExampleCreate], db: S
     
     return result
 
+async def get_project_feed_posts(
+    db: Session,
+    project_ids: List[int],
+    include_project_sources: bool = True,
+    sort_type: enums.SortType = enums.SortType.POPULAR,
+    limit: int = 100,
+) -> List[models.SocialPost]:
+    """
+    Возвращает посты, связанные с проектом через ProjectMention за последний день.
+    Если include_project_sources == False, исключает посты от связанных аккаунтов.
+    """
+    day_ago = utils_base.now_timestamp() - 60 * 60 * 24
+    # Базовый запрос: посты, связанные с проектом через ProjectMention
+    query = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects),
+        )
+        .join(models.ProjectMention, models.ProjectMention.post_id == models.SocialPost.id)
+        .where(
+            models.ProjectMention.project_id.in_(project_ids),
+            models.SocialPost.posted_at >= day_ago
+        )
+    )
+    if not include_project_sources:
+        # Получаем id аккаунтов, связанных с проектом
+        account_ids_subq = (
+            select(models.ProjectAccountStatus.account_id)
+            .where(models.ProjectAccountStatus.project_id.in_(project_ids))
+        )
+        query = query.where(~models.SocialPost.account_id.in_(account_ids_subq))
+    # Сортировка
+    if sort_type == enums.SortType.NEW:
+        query = query.order_by(desc(models.SocialPost.posted_at))
+    elif sort_type == enums.SortType.POPULAR:
+        latest_score_subq = (
+            select(
+                (
+                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
+                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
+                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
+                )
+            )
+            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
+            .order_by(desc(models.SocialPostStatistic.created_at))
+            .limit(1)
+            .scalar_subquery()
+        )
+        popularity_expr = func.coalesce(latest_score_subq, 0)
+        query = query.order_by(desc(popularity_expr))
+    query = query.limit(limit)
+    result = db.execute(query).unique().scalars().all()
+    return result
+
+async def get_project_news_posts(
+    db: Session,
+    project_ids: List[int],
+    sort_type: enums.SortType = enums.SortType.POPULAR,
+    limit: int = 100,
+) -> List[models.SocialPost]:
+    """
+    Возвращает все посты всех аккаунтов, связанных с проектом, за последний день.
+    """
+    day_ago = utils_base.now_timestamp() - 60 * 60 * 24
+    # Получаем id аккаунтов, связанных с проектом
+    account_ids_subq = (
+        select(models.ProjectAccountStatus.account_id)
+        .where(models.ProjectAccountStatus.project_id.in_(project_ids))
+    )
+    query = (
+        select(models.SocialPost)
+        .options(
+            joinedload(models.SocialPost.statistic),
+            joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects),
+        )
+        .where(
+            models.SocialPost.account_id.in_(account_ids_subq),
+            models.SocialPost.posted_at >= day_ago
+        )
+    )
+    # Сортировка
+    if sort_type == enums.SortType.NEW:
+        query = query.order_by(desc(models.SocialPost.posted_at))
+    elif sort_type == enums.SortType.POPULAR:
+        latest_score_subq = (
+            select(
+                (
+                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
+                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
+                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
+                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
+                )
+            )
+            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
+            .order_by(desc(models.SocialPostStatistic.created_at))
+            .limit(1)
+            .scalar_subquery()
+        )
+        popularity_expr = func.coalesce(latest_score_subq, 0)
+        query = query.order_by(desc(popularity_expr))
+    query = query.limit(limit)
+    result = db.execute(query).unique().scalars().all()
+    return result
+

@@ -69,45 +69,45 @@ async def select_projects(request: schemas.SelectProjectsRequest, user: models.U
 async def get_feed(
     projects_ids: Optional[List[int]] = Query(None, description="List of project IDs to filter by"),
     include_project_sources: bool = True,
-    include_other_sources: bool = True,
+    sort_type: enums.SortType = enums.SortType.POPULAR,
+    db: Session = Depends(get_session)
+):
+    """
+    Получение ленты постов, связанных с проектом (по упоминаниям), с возможностью исключения постов от связанных аккаунтов.
+    """
+    if not projects_ids:
+        projects = await crud.get_projects_all(db)
+        projects_ids = [p.id for p in projects]
+    posts = await crud.get_project_feed_posts(
+        db=db,
+        project_ids=projects_ids,
+        include_project_sources=include_project_sources,
+        sort_type=sort_type,
+        limit=100,
+    )
+    posts_schemas = utils.convert_posts_to_schemas(posts)
+    return schemas.GetFeedResponse(posts=posts_schemas)
+
+@router.get("/news", response_model=schemas.GetFeedResponse)
+async def get_news(
+    projects_ids: Optional[List[int]] = Query(None, description="List of project IDs to filter by"),
     sort_type: enums.SortType = enums.SortType.NEW,
     db: Session = Depends(get_session)
 ):
     """
-    Эндпоинт для получения ленты постов по фильтру с сортировкой и (todo:пагинацией).
-    
-    Фильтры:
-    - projects_ids: List[int] - список id проектов, если не указан, то учитываются все проекты
-    - include_project_sources: bool - включать ли посты от источников, связанных с проектами
-    - include_other_sources: bool - включать ли посты от источников, которые не относятся к проектам
-
-    Сортировка:
-    - sort_type: Enums.SortType - тип сортировки (по новизне или по популярности)
-    
-    TODO:Пагинация:
-    - page: int - номер страницы
-    - page_size: int - количество постов на странице
+    Получение всех постов всех аккаунтов, связанных с проектом, за последний день.
     """
-    filter = schemas.FeedFilter(
-        projects_ids=projects_ids,
-        include_project_sources=include_project_sources,
-        include_other_sources=include_other_sources,
-    )
-
-    posts: List[models.SocialPost] = await crud.get_posts(
-        filter=filter,
-        sort_type=sort_type,
+    if not projects_ids:
+        projects = await crud.get_projects_all(db)
+        projects_ids = [p.id for p in projects]
+    posts = await crud.get_project_news_posts(
         db=db,
+        project_ids=projects_ids,
+        sort_type=sort_type,
         limit=100,
     )
-
-    logger.info(f"Found {len(posts)} posts")
-    
-    # Преобразуем модели в схемы
     posts_schemas = utils.convert_posts_to_schemas(posts)
-    
-    response = schemas.GetFeedResponse(posts=posts_schemas)
-    return response
+    return schemas.GetFeedResponse(posts=posts_schemas)
 
 
 @router.get("/auto/settings", response_model=schemas.PersonalizationSettings)
