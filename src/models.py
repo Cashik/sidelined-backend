@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, ClassVar
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, CheckConstraint
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Enum as SQLEnum, CheckConstraint, Float
 from sqlalchemy.orm import relationship, declarative_base
 import time
 from sqlalchemy.dialects import postgresql
@@ -23,6 +23,9 @@ class User(Base):
     user_context = Column(String(500), nullable=True)
     chat_settings = Column(postgresql.JSONB, nullable=True, server_default=None)
     personalization_brain_settings = Column(postgresql.JSONB, nullable=True, server_default=None)
+    
+    twitter_login = Column(String, nullable=True, server_default=None, unique=True)
+    
     
     # сколько кредитов пользователь использовал сегодня
     used_credits_today = Column(Integer, nullable=False, default=0)
@@ -365,3 +368,44 @@ class PostTemplate(Base):
     
     def __repr__(self) -> str:
         return f"<PostTemplate(id={self.id}, project_id={self.project_id})>"
+
+"""
+class ExtendedProject(Base):
+    #Расширенная информация о проекте для отображения в лидерборде.
+    __tablename__ = "extended_project"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
+    coinbase_id = Column(String, nullable=False)
+    
+    # Relationships
+    project = relationship("Project", back_populates="extended_projects")
+
+
+class Score(Base):
+    __tablename__ = "score"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    source_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
+    post_id = Column(Integer, ForeignKey("social_post.id", ondelete="SET NULL"), nullable=True)
+    
+    engagement = Column(Float, nullable=False) # базовый рейтинг, который зависит от статистики поста
+    engagement_updated_at = Column(Integer, nullable=False) # чтобы знать, какую статистику мы использовали для расчета
+    
+    first_week_bonus = Column(Boolean, nullable=False, default=False) # бонус за первую неделю
+    current_streak = Column(Integer, nullable=False)
+    loyalty_bonus = Column(Integer, nullable=False, default=1)
+    
+    score = Column(Float, nullable=False) # engagement * (current_streak + loyalty_bonus - 1) + first_week_bonus*9
+    
+    
+    # Relationships
+    source = relationship("SocialAccount", back_populates="scores")
+    post = relationship("SocialPost", back_populates="scores")
+    
+    
+"""

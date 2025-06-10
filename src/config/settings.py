@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Server settings
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    DOMAIN: str = "localhost:8000"  # Домен для аутентификации
+    DOMAIN: str = "127.0.0.1:8000"  # Домен для аутентификации
     
     # Флаг для тестового окружения
     TESTING: bool = False
@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     
     X_RAPIDAPI_KEY: str
     X_TWITTER_API_KEY: str
+    
+    
+    # X settings
+    TWITTER_CLIENT_ID: str | None = None
+    TWITTER_CLIENT_SECRET: str | None = None
+    TWITTER_REDIRECT_URI: str = "http://127.0.0.1:8000"
+    TWITTER_SUCCESS_REDIRECT_URI: str = "http://localhost:5173/yapper/projects"
     
     @property
     def ALLOWED_ORIGINS(self) -> list[str]:

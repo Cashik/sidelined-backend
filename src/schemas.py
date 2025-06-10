@@ -72,6 +72,7 @@ class User(BaseModel):
     profile: UserProfile
     chat_settings: UserChatSettings
     connected_wallets: List[WalletAddress]
+    x_login: Optional[str] = None
 
 
 # бизнес-схемы токенов

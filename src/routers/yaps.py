@@ -1,6 +1,6 @@
 from enum import Enum
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, Request
+from fastapi.responses import StreamingResponse, RedirectResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ import json
 import jsonschema
 from jsonschema import validate, ValidationError
 import time
+from uuid import uuid4
 
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
 from src.core.middleware import get_current_user, check_balance_and_update_token
@@ -19,6 +20,7 @@ from src.config.mcp_servers import get_toolboxes, mcp_servers
 from src.services.prompt_service import PromptService
 from src.config import ai_models, subscription_plans
 from src.services.x_api_service import XApiService
+from src.services.x_oauth_service import XOAuthService
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -176,3 +178,78 @@ async def personalize(request: YapsPersonalizationRequest, user: models.User = D
     )
     return YapsPersonalizationResponse(text=variants[0], variants=variants)
 
+
+
+class LeaderboardUser(BaseModel):
+    avatar_url: str
+    name: str
+    login: str
+    followers: int
+    mindshare: float
+    scores: float
+    rank: int
+    is_active: bool
+    
+class LeaderboardResponse(BaseModel):
+    users: List[LeaderboardUser]
+    
+
+@router.get("/leaderboard", response_model=LeaderboardResponse)
+async def get_leaderboard(db: Session = Depends(get_session)):
+    """
+    Получение лидерборда
+    """
+    raise NotImplementedError("Not implemented")
+
+# --- X (Twitter) OAuth ---
+
+# Временное хранилище state -> user_id (для продакшена лучше Redis с TTL)
+OAUTH_STATE_STORAGE = {}
+
+@router.get("/x/connect-url")
+async def get_x_connect_url(user: models.User = Depends(get_current_user)):
+    """
+    Получить ссылку для подключения X (Twitter) аккаунта через OAuth (с state)
+    """
+    state = str(uuid4())
+    OAUTH_STATE_STORAGE[state] = user.id  # В реале лучше хранить с TTL
+    oauth = XOAuthService()
+    url = oauth.get_authorize_url(state)
+    return {"url": url}
+
+@router.get("/x/callback")
+async def x_oauth_callback(code: str, state: str, db: Session = Depends(get_session)):
+    """
+    Callback for OAuth X (Twitter). Saves the user's X login to the User model by state.
+    On success, redirects to frontend URL from settings.TWITTER_SUCCESS_REDIRECT_URI.
+    """
+    user_id = OAUTH_STATE_STORAGE.pop(state, None)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+    user = db.get(models.User, user_id)  # FIX: db.get is sync
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    oauth = XOAuthService()
+    token_data = await oauth.fetch_token(code)
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="No access_token from X")
+    login = await oauth.get_user_login(access_token)
+    # Check that this login is not already used
+    existing = db.execute(db.query(models.User).filter(models.User.twitter_login == login))
+    if existing.scalars().first():
+        raise HTTPException(status_code=409, detail="This X account is already linked to another user")
+    user.twitter_login = login
+    db.commit()
+    # Redirect to frontend with success params
+    redirect_url = f"{settings.TWITTER_SUCCESS_REDIRECT_URI}?success=1&login={login}"
+    return RedirectResponse(url=redirect_url)
+
+@router.post("/x/disconnect")
+async def disconnect_x_account(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Unlink X (Twitter) account from user
+    """
+    user.twitter_login = None
+    db.commit()
+    return {"message": "X account disconnected"}

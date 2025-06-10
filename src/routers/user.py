@@ -56,7 +56,8 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
             preferred_chat_style=chat_settings.chat_style, 
             preferred_chat_details_level=chat_settings.chat_details_level
         ),
-        connected_wallets=wallet_addresses
+        connected_wallets=wallet_addresses,
+        x_login=user.twitter_login
     )
 
 
