@@ -187,19 +187,24 @@ class LeaderboardUser(BaseModel):
     followers: int
     mindshare: float
     scores: float
-    rank: int
-    is_active: bool
     
 class LeaderboardResponse(BaseModel):
     users: List[LeaderboardUser]
     
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
-async def get_leaderboard(db: Session = Depends(get_session)):
+async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number of days to get leaderboard for"), db: Session = Depends(get_session)):
     """
-    Получение лидерборда
+    Получение лидерборда за определенное количество дней (1, 3 или 7 дней)
     """
-    raise NotImplementedError("Not implemented")
+    # пока возвращаем рандомные значения
+    return LeaderboardResponse(
+        users=[
+            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="John Doe", login="john_doe", followers=1000, mindshare=0.5, scores=100),
+            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="Jane Smith", login="jane_smith", followers=2000, mindshare=0.6, scores=200),
+            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="Jim Beam", login="jim_beam", followers=3000, mindshare=0.7, scores=300),
+        ]
+    )
 
 # --- X (Twitter) OAuth ---
 

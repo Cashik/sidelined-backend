@@ -959,3 +959,13 @@ Important rules for you:
     return cleaned
 
 
+async def update_project_scores(project: models.Project, db: Session):
+    """
+    Обновление рейтинга для источников, которые упоминают проект.
+    
+    Получаем все посты проекта, которые есть.
+    Обновляем очки для каждого поста.
+    
+    """
+    
+    raise NotImplementedError("Not implemented")
