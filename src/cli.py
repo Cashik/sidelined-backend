@@ -153,14 +153,14 @@ async def cleanup_old_posts_async(dry_run: bool = False):
     
     session = SessionLocal()
     try:
-        cutoff_timestamp = utils_base.now_timestamp() - settings.POST_INACTIVE_TIME_SECONDS
+        cutoff_timestamp = utils_base.now_timestamp() - settings.POST_TO_TRASH_LIFETIME_SECONDS
         
         if dry_run:
             # В режиме dry-run только показываем, что будет удалено
             stmt = select(models.SocialPost).where(models.SocialPost.posted_at < cutoff_timestamp)
             posts_to_delete = session.execute(stmt).scalars().all()
             print(f"В режиме dry-run: найдено {len(posts_to_delete)} постов для удаления")
-            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_INACTIVE_TIME_SECONDS} секунд)")
+            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_TO_TRASH_LIFETIME_SECONDS} секунд)")
             for post in posts_to_delete[:5]:  # Показываем первые 5 для примера
                 print(f"  - Post ID: {post.id}, Posted at: {post.posted_at}, Text: {post.text[:50]}...")
             if len(posts_to_delete) > 5:
@@ -169,7 +169,7 @@ async def cleanup_old_posts_async(dry_run: bool = False):
             # Реальное удаление
             deleted_count = await crud.delete_old_posts(session, cutoff_timestamp)
             print(f"Успешно удалено {deleted_count} старых постов")
-            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_INACTIVE_TIME_SECONDS} секунд)")
+            print(f"Cutoff timestamp: {cutoff_timestamp} (посты старше {settings.POST_TO_TRASH_LIFETIME_SECONDS} секунд)")
     finally:
         session.close()
 
@@ -229,6 +229,55 @@ def delete_all_admin_users(force: bool = False):
         session.close()
 
 
+def update_leaderboard(project_id: int = None):
+    """
+    Обновить лидерборд для одного или всех проектов с is_leaderboard_project=True
+    """
+    session = SessionLocal()
+    try:
+        if project_id is not None:
+            project = session.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                print(f"Проект с id={project_id} не найден")
+                return
+            print(f"Обновление лидерборда для проекта: {project.name} (id={project.id})")
+            asyncio.run(utils.update_project_leaderboard(project, session))
+        else:
+            projects = session.query(Project).filter(Project.is_leaderboard_project == True).all()
+            if not projects:
+                print("Нет проектов с is_leaderboard_project=True")
+                return
+            for project in projects:
+                print(f"Обновление лидерборда для проекта: {project.name} (id={project.id})")
+                asyncio.run(utils.update_project_leaderboard(project, session))
+    finally:
+        session.close()
+
+
+def update_users_xscore():
+    """
+    Обновить xscore для всех пользователей, чьи аккаунты упоминают лидербордские проекты и их xcore не установлен.
+    """
+    session = SessionLocal()
+    try:
+        print("Запуск обновления xscore пользователей...")
+        utils.update_users_xscore(session)
+        print("Обновление xscore пользователей завершено.")
+    finally:
+        session.close()
+
+
+def master_update():
+    """
+    Мастер-обновление: синк постов, обновление лидербордов, очистка старых постов.
+    """
+    session = SessionLocal()
+    try:
+        print("Запуск мастер-обновления...")
+        asyncio.run(utils.master_update(session))
+        print("Мастер-обновление завершено.")
+    finally:
+        session.close()
 
 
 def main():
@@ -269,6 +318,16 @@ def main():
     delete_admins_parser = subparsers.add_parser('delete-all-admins', help='Удалить всех администраторов')
     delete_admins_parser.add_argument('--force', '-f', action='store_true', help='Пропустить подтверждение')
 
+    # Команда обновления лидерборда
+    leaderboard_parser = subparsers.add_parser('update-leaderboard', help='Обновить лидерборд для проекта или всех проектов')
+    leaderboard_parser.add_argument('--project-id', '-p', type=int, required=False, help='ID проекта (если не указан, обновляются все проекты с is_leaderboard_project=True)')
+
+    # Команда мастер-апдейта
+    master_update_parser = subparsers.add_parser('master-update', help='Мастер-обновление: синк постов, лидерборд, очистка')
+
+    # Команда обновления xscore пользователей
+    update_xscore_parser = subparsers.add_parser('update-users-xscore', help='Обновить xscore для всех пользователей, чьи аккаунты упоминают лидербордские проекты')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -287,6 +346,12 @@ def main():
         create_admin_user(args.login, args.password, args.role)
     elif args.command == 'delete-all-admins':
         delete_all_admin_users(args.force)
+    elif args.command == 'update-leaderboard':
+        update_leaderboard(args.project_id)
+    elif args.command == 'master-update':
+        master_update()
+    elif args.command == 'update-users-xscore':
+        update_users_xscore()
     else:
         parser.print_help()
 
@@ -300,6 +365,8 @@ python -m src.cli sync-posts
 python -m src.cli cleanup-old-posts --dry-run
 python -m src.cli cleanup-old-posts
 python -m src.cli create-admin --login "LOGIN" --password "PASSWORD" --role "ROLE"
+python -m src.cli master-update
+python -m src.cli update-users-xscore
 """
 
 if __name__ == "__main__":

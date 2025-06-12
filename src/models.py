@@ -152,11 +152,15 @@ class Project(Base):
     icon_url = Column(String, nullable=False, default="", server_default="")
     keywords = Column(String, nullable=False)
     
+    is_leaderboard_project = Column(Boolean, nullable=False, default=False, server_default="false")
+    
     # Relationships
     accounts = relationship("ProjectAccountStatus", back_populates="project", cascade="all, delete-orphan")
     mentions = relationship("ProjectMention", back_populates="project", cascade="all, delete-orphan")
     user_selected_projects = relationship("UserSelectedProject", back_populates="project", cascade="all, delete-orphan")
     posts_templates = relationship("PostTemplate", back_populates="project", cascade="all, delete-orphan")
+    leaderboard_history = relationship("ProjectLeaderboardHistory", back_populates="project", cascade="all, delete-orphan")
+    engagements = relationship('ProjectEngagement', back_populates='project')
 
     def __str__(self) -> str:
         return f"{self.name}"
@@ -172,7 +176,6 @@ class Project(Base):
         """Display representation in select2 dropdowns"""
         return f'<span><strong>{self.name}</strong></span>'
     
-
 
 class UserSelectedProject(Base):
     __tablename__ = "user_selected_project"
@@ -196,9 +199,14 @@ class SocialAccount(Base):
     social_login = Column(String, nullable=False) # публичный логин аккаунта в соц. сети
     name = Column(String, nullable=True)
     
+    twitter_scout_score = Column(Float, nullable=True)
+    twitter_scout_score_updated_at = Column(Integer, nullable=True)
+    
     # Relationships
     posts = relationship("SocialPost", back_populates="account")
     projects = relationship("ProjectAccountStatus", back_populates="account")
+    engagements = relationship("ProjectEngagement", back_populates="social_account")
+    scores = relationship("ScorePayout", back_populates="social_account")
     
     def __str__(self) -> str:
         if self.name:
@@ -221,7 +229,6 @@ class SocialAccount(Base):
         return f'<span><strong>{self.social_login}</strong></span>'
     
 
-
 class SocialPost(Base):
     __tablename__ = "social_post"
 
@@ -240,6 +247,7 @@ class SocialPost(Base):
     account = relationship("SocialAccount", back_populates="posts")
     statistic = relationship("SocialPostStatistic", back_populates="post", cascade="all, delete-orphan")
     mentions = relationship("ProjectMention", back_populates="post", cascade="all, delete-orphan")
+
 
 class SocialPostStatistic(Base):
     __tablename__ = "social_post_statistic"
@@ -322,6 +330,7 @@ class ProjectMention(Base):
     project = relationship("Project", back_populates="mentions")
     post = relationship("SocialPost", back_populates="mentions")
 
+
 class AdminUser(Base):
     """Администратор/модератор системы"""
     __tablename__ = "admin_user"
@@ -369,43 +378,81 @@ class PostTemplate(Base):
     def __repr__(self) -> str:
         return f"<PostTemplate(id={self.id}, project_id={self.project_id})>"
 
-"""
-class ExtendedProject(Base):
-    #Расширенная информация о проекте для отображения в лидерборде.
-    __tablename__ = "extended_project"
+class ProjectLeaderboardHistory(Base):
+    # история лидерборда проекта
+    
+    __tablename__ = "project_leaderboard_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    start_ts = Column(Integer, nullable=False)
+    end_ts = Column(Integer, nullable=False)
+    
+    project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
+    
+    # Relationships
+    project = relationship("Project", back_populates="leaderboard_history")
+    scores = relationship("ScorePayout", back_populates="project_leaderboard_history", cascade="all, delete-orphan")
+
+
+class ProjectEngagement(Base):
+    """
+    engagement, который вносит юзер в проект за определенный период.
+    
+    Это просто разница в статистике по всем постам юзера за определенный период.
+    Нужно потому, что статистика по постам не живучая, а так же чтобы избежать сложных извлечений данных из статистики по постам.
+    
+    Возможно, вообще не нужно)
+    """
+
+    __tablename__ = "project_engagement"
     
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
     
     project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
-    coinbase_id = Column(String, nullable=False)
+    social_account_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
+    
+    engagement = Column(Float, nullable=False)
+    # дублируем статистику на всякий, потому что статистика поста не живучая
+    likes = Column(Integer, nullable=False)
+    comments = Column(Integer, nullable=False)
+    reposts = Column(Integer, nullable=False)
+    views = Column(Integer, nullable=False)
     
     # Relationships
-    project = relationship("Project", back_populates="extended_projects")
+    project = relationship("Project", back_populates="engagements")
+    social_account = relationship("SocialAccount", back_populates="engagements")
 
 
-class Score(Base):
-    __tablename__ = "score"
+class ScorePayout(Base):
+    __tablename__ = "score_payout"
     
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
     
-    source_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
-    post_id = Column(Integer, ForeignKey("social_post.id", ondelete="SET NULL"), nullable=True)
+    # проект, за который выплачивается score
+    project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
+    # аккаунт, которому выплачивается score
+    social_account_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
+    # id истории лидерборда, если есть
+    project_leaderboard_history_id = Column(Integer, ForeignKey("project_leaderboard_history.id", ondelete="SET NULL"), nullable=True)
     
-    engagement = Column(Float, nullable=False) # базовый рейтинг, который зависит от статистики поста
-    engagement_updated_at = Column(Integer, nullable=False) # чтобы знать, какую статистику мы использовали для расчета
+    # финальный score, который выплачивается
+    score = Column(Float, nullable=False)
     
-    first_week_bonus = Column(Boolean, nullable=False, default=False) # бонус за первую неделю
-    current_streak = Column(Integer, nullable=False)
-    loyalty_bonus = Column(Integer, nullable=False, default=1)
+    # статистические данные для лидерборда и деталей выплаты
+    engagement = Column(Float, nullable=False) # engagement, который использовался для расчета mindshare
+    mindshare = Column(Float, nullable=False) # mindshare, который использовался для расчета score
+    base_score = Column(Float, nullable=False) # базовый рейтинг, на основе текущего mindshare
     
-    score = Column(Float, nullable=False) # engagement * (current_streak + loyalty_bonus - 1) + first_week_bonus*9
-    
+    # TODO: добавить колонки для расчета бонусов
     
     # Relationships
-    source = relationship("SocialAccount", back_populates="scores")
-    post = relationship("SocialPost", back_populates="scores")
+    social_account = relationship("SocialAccount", back_populates="scores")
+    project_leaderboard_history = relationship('ProjectLeaderboardHistory', back_populates='scores')
     
+
+
     
-"""

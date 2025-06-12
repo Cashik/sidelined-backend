@@ -46,20 +46,17 @@ class Settings(BaseSettings):
     FACTS_FUNCTIONALITY_ENABLED: bool = True
     
     # Auto-Yap settings
-    POST_SYNC_UPDATE_PERIOD_SECONDS: int = 60*10 # период между синхронизациями данных с твиттером
-    POST_SYNC_PERIOD_SECONDS: int = 60*60*24 # период за который будут синхронизироваться посты (т.е. не старше 24 часов)
-    POST_SYNC_LIKES_COUNT_MINIMAL: int = 50 # минимальное количество лайков при запросе к твиттеру
-    POST_SYNC_MINIMAL_ENGAGEMENT_SCORES: int = 50 # минимальный порог вовлеченности для добавления в базу
-    
-    POST_FEED_MINIMAL_ENGAGEMENT_SCORES: int = 200 # минимальный порог вовлеченности поста для выдачи пользователю
-    
-    # Период времени, через который посты станут неактуальными и их нужно будет удалить
-    POST_INACTIVE_TIME_SECONDS: int = 60*60*24
-    # Период времени, через который система будет очищать старые посты
-    POST_CLEANUP_TIME_SECONDS: int = 60*60*24
-    # Период времени, через который система будет создавать авто-yaps (шаблоны постов)
-    AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60*30  # каждые 30 минут
-    
+    # Период времени, через который система будет обновлять ВСЕ данные (находить новые посты, обновлять лидерборды и удалять старые посты)
+    MASTER_UPDATE_PERIOD_SECONDS: int = 60*60 # 1 час
+    # Период времени в котором мы будем искать новые и обновлять старые посты
+    POST_SYNC_PERIOD_SECONDS: int = 60*60*24
+    # Минимальные параметры для добавления поста в базу (для FEED)
+    POST_SYNC_LIKES_COUNT_MINIMAL: int = 50
+    # Минимальный порог вовлеченности поста для выдачи пользователю (для FEED)
+    POST_FEED_MINIMAL_ENGAGEMENT_SCORES: int = 200
+    # Период времени, через который посты станут неактуальными и их нужно будет удалить. Не ставить меньше чем POST_SYNC_PERIOD_SECONDS
+    POST_TO_TRASH_LIFETIME_SECONDS: int = 60*60*24*7
+
     
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
@@ -79,6 +76,9 @@ class Settings(BaseSettings):
     TWITTER_CLIENT_SECRET: str | None = None
     TWITTER_REDIRECT_URI: str = "http://127.0.0.1:8000"
     TWITTER_SUCCESS_REDIRECT_URI: str = "http://localhost:5173/yapper/projects"
+    
+    # Twitter Scout API key
+    TWITTER_SCOUT_API_KEY: str | None = None
     
     @property
     def ALLOWED_ORIGINS(self) -> list[str]:

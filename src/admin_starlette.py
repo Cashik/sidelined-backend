@@ -36,6 +36,8 @@ from src.models import (
     Project,
     SocialAccount,
     ProjectAccountStatus,
+    ProjectLeaderboardHistory,
+    ScorePayout,
 )
 from src import enums
 
@@ -276,6 +278,7 @@ class ProjectAdmin(BaseProtectedView):
         StringField("url", label="Project URL", required=False, help_text="Official project website"),
         StringField("icon_url", label="Icon URL", required=False, help_text="Icon URL of the project (can be taken from the coingecko.com or oficial site)."),
         TextAreaField("keywords", label="Keywords", required=True, help_text="Search keywords (; separated). Example: 'keyword1;key word2;@keyword3'"),
+        BooleanField("is_leaderboard_project", label="Leaderboard", help_text="Является ли проект лидербордом"),
         HasMany("accounts", label="Related Accounts", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
     ]
@@ -283,6 +286,27 @@ class ProjectAdmin(BaseProtectedView):
     # Exclude system fields from forms
     exclude_fields_from_create = ["id", "created_at", "accounts"]
     exclude_fields_from_edit = ["id", "created_at", "accounts"]
+
+    async def before_edit(self, request: Request, data: dict, obj: Any) -> None:
+        # Только админ может менять is_leaderboard_project
+        role = request.session.get("admin_role")
+        if (
+            "is_leaderboard_project" in data
+            and getattr(obj, "is_leaderboard_project", None) != data["is_leaderboard_project"]
+            and role != enums.AdminRole.ADMIN.value
+        ):
+            raise FormValidationError({"is_leaderboard_project": "Только администратор может изменять это поле."})
+        # Можно добавить другие проверки, если нужно
+        
+    async def before_create(self, request: Request, data: dict, obj: Any) -> None:
+        # Только админ может выставлять is_leaderboard_project при создании
+        role = request.session.get("admin_role")
+        if (
+            "is_leaderboard_project" in data
+            and data["is_leaderboard_project"]
+            and role != enums.AdminRole.ADMIN.value
+        ):
+            raise FormValidationError({"is_leaderboard_project": "Только администратор может устанавливать это поле."})
 
 
 class SocialAccountAdmin(BaseProtectedView):
@@ -383,6 +407,45 @@ class ProjectAccountStatusAdmin(BaseProtectedView):
         )
 
 
+class ProjectLeaderboardHistoryAdmin(AdminOnlyView):
+    label = "Leaderboard History"
+    icon = "fa fa-trophy"
+    sortable_fields = ["id", "created_at", "start_ts", "end_ts", "project_id"]
+    searchable_fields = ["id", "project_id"]
+    page_size = 50
+    fields = [
+        IntegerField("id", label="ID", read_only=True),
+        IntegerField("project_id", label="Project ID", read_only=True),
+        IntegerField("start_ts", label="Start TS", read_only=True),
+        IntegerField("end_ts", label="End TS", read_only=True),
+        IntegerField("created_at", label="Created At", read_only=True),
+        HasMany("scores", label="Score Payouts", identity="score-payout"),
+    ]
+    exclude_fields_from_create = ["id", "created_at", "scores"]
+    exclude_fields_from_edit = ["id", "created_at", "scores"]
+
+
+class ScorePayoutAdmin(AdminOnlyView):
+    label = "Score Payouts"
+    icon = "fa fa-coins"
+    sortable_fields = ["id", "created_at", "project_id", "social_account_id", "score"]
+    searchable_fields = ["id", "project_id", "social_account_id"]
+    page_size = 50
+    fields = [
+        IntegerField("id", label="ID", read_only=True),
+        IntegerField("project_id", label="Project ID", read_only=True),
+        IntegerField("social_account_id", label="Account ID", read_only=True),
+        IntegerField("project_leaderboard_history_id", label="Leaderboard History ID", read_only=True),
+        IntegerField("created_at", label="Created At", read_only=True),
+        IntegerField("engagement", label="Engagement", read_only=True),
+        IntegerField("mindshare", label="Mindshare", read_only=True),
+        IntegerField("base_score", label="Base Score", read_only=True),
+        IntegerField("score", label="Score", read_only=True),
+    ]
+    exclude_fields_from_create = ["id", "created_at"]
+    exclude_fields_from_edit = ["id", "created_at"]
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -401,6 +464,8 @@ def setup_admin(app: Any) -> None:  # FastAPI/Starlette app
     admin.add_view(ProjectAdmin(Project, label="Projects", icon="fa fa-project-diagram"))
     admin.add_view(SocialAccountAdmin(SocialAccount, label="Social Accounts", icon="fa fa-share-alt"))
     admin.add_view(ProjectAccountStatusAdmin(ProjectAccountStatus, label="Project Account Status", icon="fa fa-link"))
+    admin.add_view(ProjectLeaderboardHistoryAdmin(ProjectLeaderboardHistory, label="Leaderboard History", icon="fa fa-trophy"))
+    admin.add_view(ScorePayoutAdmin(ScorePayout, label="Score Payouts", icon="fa fa-coins"))
 
     # Finally mount to the app
     admin.mount_to(app)

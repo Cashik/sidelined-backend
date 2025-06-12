@@ -3,13 +3,14 @@ import re
 import time
 import json
 import os
+import traceback
 from typing import AsyncGenerator, Callable, Optional, Dict, List, Any, TypeVar
 import logging
 import openai
 from openai import OpenAI
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
-
+import requests
 
 from src import schemas, enums, models, exceptions, crud
 from src.config.settings import settings
@@ -21,6 +22,8 @@ from src.services import x_api_service
 from src.config.mcp_servers import mcp_servers as mcp_servers_list
 from src.utils_base import now_timestamp, parse_date_to_timestamp
 import inspect
+from collections import defaultdict
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -619,11 +622,17 @@ async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db
 
 
 
-def calculate_post_engagement_score(post: schemas.Post) -> float:
+def calculate_post_engagement_score_for_shema(post: schemas.Post) -> float:
     """
     Расчет показателя вовлеченности поста.
     """
-    return post.stats.views_count*0.001 + post.stats.favorite_count * 1 + post.stats.retweet_count * 3 + post.stats.reply_count * 4
+    return calculate_post_engagement_score(post.stats.views_count, post.stats.favorite_count, post.stats.retweet_count, post.stats.reply_count)
+
+def calculate_post_engagement_score(views: int, likes: int, reposts: int, comments: int) -> float:
+    """
+    Расчет показателя вовлеченности поста.
+    """
+    return views*0.001 + likes * 1 + reposts * 3 + comments * 4
 
 def convert_posts_to_schemas(posts: List[models.SocialPost]) -> List[schemas.Post]:
     """
@@ -684,7 +693,7 @@ async def create_project_autoyaps(project: models.Project, db: Session) -> List[
     # преобразуем в схему
     project_feed = convert_posts_to_schemas(project_posts)
     # сортируем по убыванию популярности
-    project_feed.sort(key=lambda x: calculate_post_engagement_score(x), reverse=True)
+    project_feed.sort(key=lambda x: calculate_post_engagement_score_for_shema(x), reverse=True)
     # убираем самые непопулярные посты
     project_feed = project_feed[:feed_limit]
     # сортируем еще раз по времени публикации 
@@ -969,3 +978,288 @@ async def update_project_scores(project: models.Project, db: Session):
     """
     
     raise NotImplementedError("Not implemented")
+
+def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -> list[schemas.LeaderboardUser]:
+    """
+    Формирует список LeaderboardUser по истории лидерборда проекта.
+    - mindshare: среднее арифметическое по всем историям (если нет выплаты — 0)
+    - scores: сумма всех выплат
+    - avatar_url, followers: пустые
+    - name, login: из SocialAccount
+    """
+    if not histories:
+        return []
+    
+    total_period_seconds = 0
+    for history in histories:
+        total_period_seconds += history.end_ts - history.start_ts
+
+    # Собираем все уникальные аккаунты
+    accounts = {}
+    for history in histories:
+        period_seconds = history.end_ts - history.start_ts
+        for payout in history.scores:
+            acc = payout.social_account
+            # создаем аккаунт, если его нет
+            if acc.id not in accounts:
+                accounts[acc.id] = schemas.LeaderboardUser(
+                    avatar_url=None,
+                    name=acc.name or acc.social_login or f"id{acc.id}",
+                    login=acc.social_login or f"id{acc.id}",
+                    followers=0,
+                    mindshare=0.0,
+                    scores=0.0
+                )
+            # суммируем mindshare и scores
+            accounts[acc.id].mindshare += (payout.mindshare*period_seconds)/total_period_seconds
+            accounts[acc.id].scores += payout.score
+    
+    logger.info(f"Sum of mindshare: {sum(acc.mindshare for acc in accounts.values())}")
+    # Сортируем по scores убыванию
+    result = list(accounts.values())
+    result.sort(key=lambda u: u.scores, reverse=True)
+    return result
+
+
+async def update_project_leaderboard(project: models.Project, db: Session):
+    """
+    Обновление лидерборда проекта с подробной статистикой и логированием.
+    """
+    from pydantic import BaseModel
+    from sqlalchemy import desc
+    import asyncio
+
+    class ProjectLeaderboardUser(BaseModel):
+        social_account_id: int
+        xscore: float = 0.0
+        base_engagement: float = 0.0
+        mindshare: float = 0.0
+        base_score: float = 0.0
+        score: float = 0.0
+
+    # 1. Получаем дату последнего leaderboard_history (или сутки назад)
+    last_history = (
+        db.query(models.ProjectLeaderboardHistory)
+        .filter(models.ProjectLeaderboardHistory.project_id == project.id)
+        .order_by(desc(models.ProjectLeaderboardHistory.created_at))
+        .first()
+    )
+    if last_history:
+        period_start = last_history.end_ts+1
+        logger.info(f"[Leaderboard] Last history found: {period_start}")
+    else:
+        period_start = now_timestamp() - 86400
+        logger.info(f"[Leaderboard] No history found, using last 24h: {period_start}")
+    period_end = now_timestamp()
+    period_seconds = period_end - period_start
+
+    # 2. Получаем ВСЕ посты с упоминанием проекта, у которых есть статистика за период
+    posts: list[models.SocialPost] = await crud.get_project_feed(project, settings.POST_SYNC_PERIOD_SECONDS, db)
+    logger.info(f"[Leaderboard] Posts fetched: {len(posts)}")
+    if not posts:
+        logger.info(f"[Leaderboard] No posts for leaderboard update for project {project.id}")
+        return
+
+    # 3. Для каждого поста ищем старую и новую статистику, считаем engagement
+    user_stats: dict[int, ProjectLeaderboardUser] = {}
+    total_stats_processed = 0
+    posts_with_engagement = 0
+    for post in posts:
+        # Найти свежую статистику за период (created_at >= period_start)
+        stats_in_period = [s for s in post.statistic if s.created_at >= period_start]
+        total_stats_processed += len(stats_in_period)
+        if not stats_in_period:
+            continue  # пост не обновлялся за период
+        new_stats = max(stats_in_period, key=lambda s: s.created_at)
+        # Найти самую свежую статистику до периода (created_at < period_start)
+        stats_before = [s for s in post.statistic if s.created_at < period_start]
+        if stats_before:
+            old_stats = max(stats_before, key=lambda s: s.created_at)
+            old_views = old_stats.views
+            old_likes = old_stats.likes
+            old_reposts = old_stats.reposts
+            old_comments = old_stats.comments
+        else:
+            old_views = old_likes = old_reposts = old_comments = 0
+        # Считаем engagement
+        delta_views = max(0, new_stats.views - old_views)
+        delta_likes = max(0, new_stats.likes - old_likes)
+        delta_reposts = max(0, new_stats.reposts - old_reposts)
+        delta_comments = max(0, new_stats.comments - old_comments)
+        engagement = calculate_post_engagement_score(delta_views, delta_likes, delta_reposts, delta_comments)
+        if engagement == 0:
+            continue
+        posts_with_engagement += 1
+        acc_id = post.account_id
+        if acc_id not in user_stats:
+            # Получаем xscore (или 50)
+            xscore = post.account.twitter_scout_score if post.account.twitter_scout_score is not None else 50.0
+            user_stats[acc_id] = ProjectLeaderboardUser(social_account_id=acc_id, xscore=xscore)
+        user_stats[acc_id].base_engagement += engagement
+
+    if not user_stats:
+        logger.warning(f"[Leaderboard] No user engagement for leaderboard update for project {project.id}")
+        logger.info(f"[Leaderboard] Stats processed: {total_stats_processed}, posts with engagement: {posts_with_engagement}")
+        return
+
+    # 4. Считаем суммарные xscore и engagement
+    sum_xscore = 0
+    sum_engagement = 0
+    for u in user_stats.values():
+        sum_xscore += u.xscore
+        sum_engagement += u.base_engagement
+    logger.info(f"[Leaderboard] Users: {len(user_stats)}, sum_xscore: {sum_xscore}, sum_engagement: {sum_engagement}")
+    if sum_xscore == 0 or sum_engagement == 0:
+        logger.warning(f"[Leaderboard] Zero xscore or engagement for leaderboard update for project {project.id}")
+        return
+
+    # 5. Считаем period_reward (при условии, что за 24 часа должны раздать 1000 base_score)
+    period_reward = 1000 * (period_seconds / 86400)
+    logger.info(f"[Leaderboard] period_reward: {period_reward:.2f} for {period_seconds} seconds")
+
+    # 6. Для каждого автора считаем XUSD, EDS, mindshare, base_score, score
+    total_mindshare = 0
+    total_base_score = 0
+    total_score = 0
+    for u in user_stats.values():
+        XUSD = u.xscore / sum_xscore
+        EDS = u.base_engagement / sum_engagement
+        u.mindshare = 0.5 * XUSD + 0.5 * EDS
+        u.base_score = u.mindshare * period_reward
+        u.score = u.base_score * 1  # TODO: учесть мультипликаторы юзера
+        total_mindshare += u.mindshare
+        total_base_score += u.base_score
+        total_score += u.score
+
+    logger.info(f"[Leaderboard] Total mindshare: {total_mindshare:.4f}, total base_score: {total_base_score:.2f}, total score: {total_score:.2f}")
+
+    # 7. Сохраняем ScorePayout и ProjectLeaderboardHistory
+    
+    history = models.ProjectLeaderboardHistory(
+        project_id=project.id,
+        start_ts=period_start,
+        end_ts=period_end,
+        created_at=period_end,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(history)
+    payouts = []
+    for u in user_stats.values():
+        payout = models.ScorePayout(
+            project_id=project.id,
+            social_account_id=u.social_account_id,
+            project_leaderboard_history_id=history.id,
+            score=u.score,
+            engagement=u.base_engagement,
+            mindshare=u.mindshare,
+            base_score=u.base_score,
+            created_at=period_end,
+        )
+        db.add(payout)
+        payouts.append(payout)
+    db.commit()
+    
+    logger.info(f"[Leaderboard] Leaderboard updated for project {project.id}: {len(payouts)} payouts, period {period_start} - {period_end}")
+    logger.info(f"[Leaderboard] Posts processed: {len(posts)}, stats processed: {total_stats_processed}, posts with engagement: {posts_with_engagement}, users: {len(user_stats)}")
+
+
+async def cleanup_old_posts(db: Session):
+    """
+    Очищает старые посты после обновлений, чтобы не засорять базу.
+    """
+    cutoff_timestamp = now_timestamp() - settings.POST_TO_TRASH_LIFETIME_SECONDS
+    await crud.delete_old_posts(db, cutoff_timestamp)
+
+
+async def master_update(db: Session):
+    """
+    Единый метод для обновления всех данных приложения.
+    
+    1. Безопасно обновляет посты по всем проектам.
+    2. Обновляет лидерборды по нужным проектам.
+    3. Очищает старые посты после обновлений, чтобы не засорять базу.
+    
+    Вызывается из celery task и cli скрипта.
+    """
+    from_ts = now_timestamp() - settings.POST_SYNC_PERIOD_SECONDS
+    
+    # проекты для обновления
+    projects = db.query(models.Project).all()
+    for project in projects:
+        try:
+            # обновляем посты фида (от всех источников)
+            feed_updated = await update_project_feed(project, from_ts, db)
+            # обновляем news посты (от офф источников)
+            news_updated = await update_project_news(project, from_ts, db)
+            
+            if not (feed_updated or news_updated):
+                logger.info(f"[MasterUpdate] No updates for project {project.id}")
+                continue
+            
+            if project.is_leaderboard_project:
+                # обновляем лидерборд
+                await update_project_leaderboard(project, db)
+                logger.info(f"[MasterUpdate] Leaderboard updated for project {project.id}")
+        except Exception as e:
+            logger.error(f"[MasterUpdate] Error updating project {project.id}. Details: {e} {traceback.format_exc()}")
+            
+    # очищаем старые посты
+    deleted_count = await cleanup_old_posts(db)
+    logger.info(f"[MasterUpdate] Deleted {deleted_count} old posts")
+    
+
+def update_users_xscore(db: Session):
+    """
+    Обновляет xscore для всех пользователей, чьи аккаунты упоминают лидербордские проекты и их xcore не установлен.
+    """
+    
+    # получаем все аккаунты, у которых есть хотя бы один пост с упоминанием любого проекта с включенным лидербордом.
+    social_accounts = (
+        db.query(models.SocialAccount)
+        .join(models.SocialPost, models.SocialAccount.id == models.SocialPost.account_id)
+        .join(models.ProjectMention, models.SocialPost.id == models.ProjectMention.post_id)
+        .join(models.Project, models.ProjectMention.project_id == models.Project.id)
+        .filter(models.Project.is_leaderboard_project == True)
+        .distinct()
+        .all()
+    )
+    
+    # обновляем xscore для этих пользователей
+    for social_account in social_accounts:
+        if social_account.twitter_scout_score is not None:
+            continue
+        try:
+            user_xscore = get_social_account_xscore(social_account)
+            social_account.twitter_scout_score = user_xscore
+            social_account.twitter_scout_score_updated_at = now_timestamp()
+            db.add(social_account)
+            db.commit()
+            db.refresh(social_account)
+            logger.info(f"[XScore update] Updated xscore for social account {social_account.id}: {user_xscore}")
+        except Exception as e:
+            logger.error(f"[XScore update] Error updating xscore for social account {social_account.id}: {e}")
+        pass
+    
+    logger.info(f"[XScore update] Updated {len(social_accounts)} social accounts")
+
+
+def get_social_account_xscore(social_account: models.SocialAccount) -> float:
+    """
+    Получает xscore для пользователя.
+    
+    https://api.tweetscout.io/v2/score/{user_handle}
+    """
+    if not settings.TWITTER_SCOUT_API_KEY:
+        raise Exception("TWITTER_SCOUT_API_KEY is not set")
+    
+    url = f"https://api.tweetscout.io/v2/score/{social_account.social_login}"
+    response = requests.get(url, headers={"ApiKey": f"{settings.TWITTER_SCOUT_API_KEY}", "Accept": "application/json"})
+    if response.status_code == 200:
+        return response.json()["score"]
+    else:
+        return None
+    
+    
+    # получаем все посты с упоминанием проекта лидерборда
+    

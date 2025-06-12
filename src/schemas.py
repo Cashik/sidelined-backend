@@ -506,3 +506,12 @@ class PostExample(PostExampleCreate):
 class AutoYapsGenerationSettings(BaseModel):
     project_feed: List[Post]
     model: AIModel
+
+
+class LeaderboardUser(BaseModel):
+    avatar_url: Optional[str] = None
+    name: str
+    login: str
+    followers: Optional[int] = None
+    mindshare: float
+    scores: float

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, R
 from fastapi.responses import StreamingResponse, RedirectResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import logging
 import json
 import jsonschema
@@ -178,18 +178,9 @@ async def personalize(request: YapsPersonalizationRequest, user: models.User = D
     )
     return YapsPersonalizationResponse(text=variants[0], variants=variants)
 
-
-
-class LeaderboardUser(BaseModel):
-    avatar_url: str
-    name: str
-    login: str
-    followers: int
-    mindshare: float
-    scores: float
     
 class LeaderboardResponse(BaseModel):
-    users: List[LeaderboardUser]
+    users: List[schemas.LeaderboardUser]
     
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -197,14 +188,28 @@ async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number o
     """
     Получение лидерборда за определенное количество дней (1, 3 или 7 дней)
     """
-    # пока возвращаем рандомные значения
-    return LeaderboardResponse(
-        users=[
-            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="John Doe", login="john_doe", followers=1000, mindshare=0.5, scores=100),
-            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="Jane Smith", login="jane_smith", followers=2000, mindshare=0.6, scores=200),
-            LeaderboardUser(avatar_url="https://via.placeholder.com/150", name="Jim Beam", login="jim_beam", followers=3000, mindshare=0.7, scores=300),
-        ]
+    # 1. Получаем первый проект с is_leaderboard_project=True
+    project = db.query(models.Project).filter(models.Project.is_leaderboard_project == True).first()
+    if not project:
+        return LeaderboardResponse(users=[])
+
+    # 2. Получаем истории за период
+    now_ts = int(time.time())
+    from_ts = now_ts - days * 86400
+    histories = (
+        db.query(models.ProjectLeaderboardHistory)
+        .options(joinedload(models.ProjectLeaderboardHistory.scores).joinedload(models.ScorePayout.social_account))
+        .filter(models.ProjectLeaderboardHistory.project_id == project.id)
+        .filter(models.ProjectLeaderboardHistory.created_at >= from_ts)
+        .order_by(models.ProjectLeaderboardHistory.created_at)
+        .all()
     )
+    if not histories:
+        return LeaderboardResponse(users=[])
+
+    # 3. Собираем leaderboard
+    users = utils.build_leaderboard_users(histories)
+    return LeaderboardResponse(users=users)
 
 # --- X (Twitter) OAuth ---
 
@@ -258,3 +263,42 @@ async def disconnect_x_account(user: models.User = Depends(get_current_user), db
     user.twitter_login = None
     db.commit()
     return {"message": "X account disconnected"}
+
+
+class StreakResponse(BaseModel):
+    weeks: int
+    multiplier: float
+
+class PersonalResultsResponse(BaseModel):
+    total_score: int
+    posts_count: int
+    daily_mindshare: float
+    loyalty: int # todo: разобраться с этим параметром
+    streak: StreakResponse
+    new_author_bonus: bool
+    
+    
+@router.get("/leaderboard/personal")
+async def get_personal_results(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Получение персональных результатов пользователя
+    
+    project_id: int - id проекта, для которого нужно получить результаты
+    """
+    # TODO: реализовать
+    return PersonalResultsResponse(
+        total_score=100,
+        posts_count=10,
+        daily_mindshare=0.5,
+        loyalty=100,
+        streak=StreakResponse(weeks=1, multiplier=1.0),
+        new_author_bonus=True
+    )
+    
+class CoinMarketCapResponse(BaseModel):
+    price: float
+    market_cap: float
+    volume: float
+    change_24h: float
+    change_7d: float
+

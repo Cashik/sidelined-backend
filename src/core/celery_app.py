@@ -57,8 +57,7 @@ celery_app = Celery(
     broker=redis_url,
     backend=redis_url,
     include=[
-        "src.tasks.sync_posts",  # регистрируем модуль с задачами
-        "src.tasks.cleanup_posts",  # регистрируем модуль с задачами очистки
+        "src.tasks.master_update",  # регистрируем модуль с задачами
         "src.tasks.create_autoyaps",  # регистрируем модуль с задачами создания авто-постов
     ],
 )
@@ -83,28 +82,22 @@ def init_worker(**kwargs):
 # ---- Celery конфигурация ----
 # Интервал синхронизации постов (сек). По умолчанию 60 сек для dev.
 celery_app.conf.beat_schedule = {
-    "sync-posts": {
-        "task": "src.tasks.sync_posts.sync_posts",
-        "schedule": settings.POST_SYNC_UPDATE_PERIOD_SECONDS,
-        "options": {"queue": "default"},
-    },
-    "cleanup-old-posts": {
-        "task": "src.tasks.cleanup_posts.cleanup_old_posts",
-        "schedule": settings.POST_CLEANUP_TIME_SECONDS,
-        "options": {"queue": "default"},
-    },
     "create-autoyaps": {
         "task": "src.tasks.create_autoyaps.create_autoyaps",
         "schedule": settings.AUTOYAPS_SYNC_PERIOD_SECONDS,
+        "options": {"queue": "default"},
+    },
+    "master-update": {
+        "task": "src.tasks.master_update.master_update",
+        "schedule": settings.MASTER_UPDATE_PERIOD_SECONDS,
         "options": {"queue": "default"},
     },
 }
 
 # Роутинг задач
 celery_app.conf.task_routes = {
-    "src.tasks.sync_posts.sync_posts": {"queue": "default"},
-    "src.tasks.cleanup_posts.cleanup_old_posts": {"queue": "default"},
     "src.tasks.create_autoyaps.create_autoyaps": {"queue": "default"},
+    "src.tasks.master_update.master_update": {"queue": "default"},
 }
 
 # Дополнительные настройки для стабильной работы
