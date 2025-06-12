@@ -56,7 +56,8 @@ class Settings(BaseSettings):
     POST_FEED_MINIMAL_ENGAGEMENT_SCORES: int = 200
     # Период времени, через который посты станут неактуальными и их нужно будет удалить. Не ставить меньше чем POST_SYNC_PERIOD_SECONDS
     POST_TO_TRASH_LIFETIME_SECONDS: int = 60*60*24*7
-
+    # Период времени, через который создаются auto_yaps
+    AUTOYAPS_SYNC_PERIOD_SECONDS: int = 60*60*4  # каждые 4 часа
     
     # Token requirements
     BALANCE_CHECK_LIFETIME_SECONDS: int = 60*60*4 # default 4 hours
