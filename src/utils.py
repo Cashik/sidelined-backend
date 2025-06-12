@@ -979,12 +979,23 @@ async def update_project_scores(project: models.Project, db: Session):
     
     raise NotImplementedError("Not implemented")
 
+def extract_profile_info_from_post(post) -> tuple[Optional[str], Optional[int]]:
+    try:
+        user_legacy = (
+            post.raw_data["core"]["user_results"]["result"]["legacy"]
+        )
+        profile_url = user_legacy.get("profile_image_url_https")
+        followers_count = user_legacy.get("followers_count")
+        return profile_url, followers_count
+    except Exception:
+        return None, None
+
 def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -> list[schemas.LeaderboardUser]:
     """
     Формирует список LeaderboardUser по истории лидерборда проекта.
     - mindshare: среднее арифметическое по всем историям (если нет выплаты — 0)
     - scores: сумма всех выплат
-    - avatar_url, followers: пустые
+    - avatar_url, followers: из самого свежего поста (если есть)
     - name, login: из SocialAccount
     """
     if not histories:
@@ -996,6 +1007,7 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -
 
     # Собираем все уникальные аккаунты
     accounts = {}
+    posts_by_account = defaultdict(list)
     for history in histories:
         period_seconds = history.end_ts - history.start_ts
         for payout in history.scores:
@@ -1006,17 +1018,29 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -
                     avatar_url=None,
                     name=acc.name or acc.social_login or f"id{acc.id}",
                     login=acc.social_login or f"id{acc.id}",
-                    followers=0,
+                    followers=None,
                     mindshare=0.0,
                     scores=0.0
                 )
             # суммируем mindshare и scores
             accounts[acc.id].mindshare += (payout.mindshare*period_seconds)/total_period_seconds
             accounts[acc.id].scores += payout.score
+            # собираем посты
+            posts_by_account[acc.id].extend(acc.posts)
     
     logger.info(f"Sum of mindshare: {sum(acc.mindshare for acc in accounts.values())}")
     # Сортируем по scores убыванию
     result = list(accounts.values())
+    # --- ДОБАВЛЯЕМ avatar_url и followers из самого свежего поста ---
+    for acc_id, acc in accounts.items():
+        user_posts = posts_by_account.get(acc_id, [])
+        if user_posts:
+            latest_post = max(user_posts, key=lambda p: p.posted_at)
+            profile_url, followers_count = extract_profile_info_from_post(latest_post)
+        else:
+            profile_url, followers_count = None, None
+        acc.avatar_url = profile_url
+        acc.followers = followers_count
     result.sort(key=lambda u: u.scores, reverse=True)
     return result
 

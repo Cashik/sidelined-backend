@@ -378,6 +378,7 @@ class PostTemplate(Base):
     def __repr__(self) -> str:
         return f"<PostTemplate(id={self.id}, project_id={self.project_id})>"
 
+
 class ProjectLeaderboardHistory(Base):
     # история лидерборда проекта
     
