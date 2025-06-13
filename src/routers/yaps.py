@@ -250,6 +250,38 @@ async def x_oauth_callback(code: str, state: str, db: Session = Depends(get_sess
     if existing.scalars().first():
         raise HTTPException(status_code=409, detail="This X account is already linked to another user")
     user.twitter_login = login
+
+    # --- Создание SocialAccount и установка xscore ---
+    social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == login).first()
+    if not social_account:
+        # Получаем rest_id через XApiService (лучше, чем просто login)
+        try:
+            x_api = XApiService()
+            rest_id = await x_api.get_user_social_id(login)
+            social_account = models.SocialAccount(
+                social_id=rest_id,
+                social_login=login,
+                name=login
+            )
+            db.add(social_account)
+            db.commit()
+            db.refresh(social_account)
+        except Exception as e:
+            logger.error(f"Do not get rest_id for {login}: {e}")
+            rest_id = login  # fallback
+        
+    # Устанавливаем xscore, если не установлен
+    if social_account and social_account.twitter_scout_score is None:
+        try:
+            from src import utils
+            xscore = utils.get_social_account_xscore(social_account)
+            social_account.twitter_scout_score = xscore
+            social_account.twitter_scout_score_updated_at = int(time.time())
+            db.commit()
+        except Exception as e:
+            logger.error(f"Cannot get xscore for {login}: {e}")
+    # --- конец блока ---
+
     db.commit()
     # Redirect to frontend with success params
     redirect_url = f"{settings.TWITTER_SUCCESS_REDIRECT_URI}?success=1&login={login}"
@@ -273,7 +305,6 @@ class MindshareTable(BaseModel):
     current: float
     today: float
     yesterday: float
-
 
 class PersonalResultsResponse(BaseModel):
     total_score: int
