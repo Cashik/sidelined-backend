@@ -990,7 +990,7 @@ def extract_profile_info_from_post(post) -> tuple[Optional[str], Optional[int]]:
     except Exception:
         return None, None
 
-def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -> list[schemas.LeaderboardUser]:
+def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], from_ts) -> list[schemas.LeaderboardUser]:
     """
     Формирует список LeaderboardUser по истории лидерборда проекта.
     - mindshare: среднее арифметическое по всем историям (если нет выплаты — 0)
@@ -1003,13 +1003,13 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory]) -
     
     total_period_seconds = 0
     for history in histories:
-        total_period_seconds += history.end_ts - history.start_ts
+        total_period_seconds += history.end_ts - max(history.start_ts, from_ts)
 
     # Собираем все уникальные аккаунты
     accounts = {}
     posts_by_account = defaultdict(list)
     for history in histories:
-        period_seconds = history.end_ts - history.start_ts
+        period_seconds = history.end_ts - max(history.start_ts, from_ts)
         for payout in history.scores:
             acc = payout.social_account
             # создаем аккаунт, если его нет

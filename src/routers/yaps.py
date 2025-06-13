@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, R
 from fastapi.responses import StreamingResponse, RedirectResponse
 from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 import logging
 import json
 import jsonschema
@@ -208,7 +208,7 @@ async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number o
         return LeaderboardResponse(users=[])
 
     # 3. Собираем leaderboard
-    users = utils.build_leaderboard_users(histories)
+    users = utils.build_leaderboard_users(histories, from_ts)
     return LeaderboardResponse(users=users)
 
 # --- X (Twitter) OAuth ---
@@ -265,34 +265,107 @@ async def disconnect_x_account(user: models.User = Depends(get_current_user), db
     return {"message": "X account disconnected"}
 
 
-class StreakResponse(BaseModel):
-    weeks: int
+class Multiplier(BaseModel):
+    value: int
     multiplier: float
+    
+class MindshareTable(BaseModel):
+    current: float
+    today: float
+    yesterday: float
+
 
 class PersonalResultsResponse(BaseModel):
     total_score: int
-    posts_count: int
-    daily_mindshare: float
-    loyalty: int # todo: разобраться с этим параметром
-    streak: StreakResponse
-    new_author_bonus: bool
+    mindshare: MindshareTable
+    loyalty_bonus: Multiplier # todo: разобраться с этим параметром
+    streak_bonus: Multiplier
+    new_author_bonus: Multiplier
+
+def _calc_mindshare(payouts, start_ts, end_ts) -> float:
+    """
+    Для заданного периода считает средневзвешенный mindshare пользователя.
+    Аналогично build_leaderboard_users, но только для одного social_account.
+    """
+    if not payouts:
+        return 0.0
     
+    all_period_weight = end_ts - start_ts
+    user_mindshare = 0
+    logger.info(f"all_period_weight: {all_period_weight}")
+    for payout in payouts:
+        h = payout.project_leaderboard_history
+        # Период history
+        if h.start_ts >= end_ts or h.end_ts <= start_ts:
+            # пропускаем, если период не пересекается с заданным
+            logger.info(f"skipping payout: {payout}")
+            continue
+        period_weight = min(h.end_ts, end_ts) - max(h.start_ts, start_ts)
+        logger.info(f"payperiod_weightout: {period_weight} end_ts: {end_ts} start_ts: {start_ts}")
+        user_mindshare += (payout.mindshare * period_weight) / all_period_weight
+        logger.info(f"user_mindshare: {user_mindshare}")
+        
+    return user_mindshare
     
 @router.get("/leaderboard/personal")
 async def get_personal_results(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Получение персональных результатов пользователя
-    
-    project_id: int - id проекта, для которого нужно получить результаты
     """
-    # TODO: реализовать
+    # 1. Проверяем наличие twitter_login
+    if not user.twitter_login:
+        raise exceptions.XAccountNotLinkedError()
+
+    # 2. Получаем первый проект с is_leaderboard_project=True
+    project = db.query(models.Project).filter(models.Project.is_leaderboard_project == True).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="There is no leaderboard project.")
+
+    # 3. Получаем social_account по twitter_login
+    social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == user.twitter_login).first()
+    #social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == "Calderaxyz").first()
+    if not social_account:
+        # такого быть не должно, но если так, то возвращаем 0
+        return PersonalResultsResponse(
+            total_score=0,
+            mindshare=MindshareTable(current=0, today=0, yesterday=0),
+            loyalty_bonus=Multiplier(value=0, multiplier=1.0),
+            streak_bonus=Multiplier(value=0, multiplier=1.0),
+            new_author_bonus=Multiplier(value=0, multiplier=1.0)
+        )
+
+    # 4. Получаем все payouts по этому проекту и social_account
+    payouts = await crud.get_account_payouts(db, project.id, social_account.id)
+    payouts.sort(key=lambda p: p.project_leaderboard_history.created_at)
+    if not payouts:
+        return PersonalResultsResponse(
+            total_score=0,
+            mindshare=MindshareTable(current=0, today=0, yesterday=0),
+            loyalty_bonus=Multiplier(value=0, multiplier=1.0),
+            streak_bonus=Multiplier(value=0, multiplier=1.0),
+            new_author_bonus=Multiplier(value=0, multiplier=1.0)
+        )
+
+    # Считаем не ровно день назад, а за чуть меньший промежуток времени ( не учитываем время с последнего обновления)
+    end_ts = await crud.get_project_leaderboard_last_ts(db, project.id)
+    day_seconds = 86400
+    now_ts = utils_base.now_timestamp()
+    today_mindshare = _calc_mindshare(payouts, now_ts - day_seconds, end_ts)
+    yesterday_mindshare = _calc_mindshare(payouts, now_ts - 2*day_seconds, end_ts - day_seconds)
+    
+    all_time_mindshare = _calc_mindshare(payouts, 0, end_ts)
+    logger.info(f"all_time_mindshare: {all_time_mindshare}")
+    
     return PersonalResultsResponse(
-        total_score=100,
-        posts_count=10,
-        daily_mindshare=0.5,
-        loyalty=100,
-        streak=StreakResponse(weeks=1, multiplier=1.0),
-        new_author_bonus=True
+        total_score=int(sum(p.score for p in payouts)),
+        mindshare=MindshareTable(
+            current=payouts[-1].mindshare, 
+            today=today_mindshare, 
+            yesterday=yesterday_mindshare
+        ),
+        loyalty_bonus=Multiplier(value=0, multiplier=1.0),
+        streak_bonus=Multiplier(value=0, multiplier=1.0),
+        new_author_bonus=Multiplier(value=0, multiplier=1.0)
     )
     
 class CoinMarketCapResponse(BaseModel):

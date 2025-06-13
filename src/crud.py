@@ -1116,3 +1116,20 @@ async def get_project_news_posts(
     result = db.execute(query).unique().scalars().all()
     return result
 
+
+async def get_account_payouts(db: Session, project_id: int, account_id: int) -> List[models.ScorePayout]:
+    """
+    Получение всех payouts для аккаунта в проекте.
+    """
+    return db.query(models.ScorePayout).filter(
+        models.ScorePayout.project_id == project_id,
+        models.ScorePayout.social_account_id == account_id
+    ).all()
+    
+async def get_project_leaderboard_last_ts(db: Session, project_id: int) -> int:
+    """
+    Получение timestamp последнего обновления leaderboard для проекта.
+    """
+    return db.query(models.ProjectLeaderboardHistory).filter(
+        models.ProjectLeaderboardHistory.project_id == project_id
+    ).order_by(desc(models.ProjectLeaderboardHistory.created_at)).first().created_at

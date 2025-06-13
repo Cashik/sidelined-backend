@@ -74,4 +74,8 @@ class PromoCodeNotFoundError(BusinessError):
 class AutoYapsError(BusinessError):
     def __init__(self, message: str):
         super().__init__(code="auto_yaps_error", message=message)
+        
+class XAccountNotLinkedError(BusinessError):
+    def __init__(self):
+        super().__init__(code="x_account_not_linked", message="Your X account is not linked to your account.")
 
