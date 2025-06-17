@@ -154,6 +154,7 @@ class Project(Base):
     
     search_min_likes = Column(Integer, nullable=True, default=None)
     
+    is_selected_by_default = Column(Boolean, nullable=False, default=False, server_default="false")
     is_leaderboard_project = Column(Boolean, nullable=False, default=False, server_default="false")
     
     # Relationships

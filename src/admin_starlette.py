@@ -279,7 +279,8 @@ class ProjectAdmin(BaseProtectedView):
         StringField("icon_url", label="Icon URL", required=False, help_text="Icon URL of the project (can be taken from the coingecko.com or oficial site)."),
         TextAreaField("keywords", label="Keywords", required=True, help_text="Search keywords (; separated). Example: 'keyword1;key word2;@keyword3'"),
         IntegerField("search_min_likes", label="Min likes for search", required=False, help_text="Leave empty to use the default value for this project."),
-        BooleanField("is_leaderboard_project", label="Leaderboard", help_text="Является ли проект лидербордом"),
+        BooleanField("is_leaderboard_project", label="Leaderboard enabled", help_text="Turn on to enable leaderboard for this project. MUST BE ONLY ONE LEADERBOARD PROJECT."),
+        BooleanField("is_selected_by_default", label="Selected by default for new users", help_text="Add this project to new users automatically."),
         HasMany("accounts", label="Related Accounts", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
     ]

@@ -37,6 +37,22 @@ async def get_or_create_user(address: str, session: Session) -> models.User:
     session.add(wallet)
     session.commit()
     session.refresh(user)
+
+    # Добавляем дефолтные проекты
+    try:
+        default_projects = session.execute(
+            select(models.Project).where(models.Project.is_selected_by_default == True)
+        ).scalars().all()
+        user_selected_projects = [
+            models.UserSelectedProject(user_id=user.id, project_id=project.id)
+            for project in default_projects
+        ]
+        if user_selected_projects:
+            session.add_all(user_selected_projects)
+            session.commit()
+            session.refresh(user)
+    except Exception as e:
+        logger.error(f"Error adding default projects to user {user.id}: {e}")
     
     return user
 
