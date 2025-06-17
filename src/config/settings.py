@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # Период времени в котором мы будем искать новые и обновлять старые посты
     POST_SYNC_PERIOD_SECONDS: int = 60*60*24
     # Минимальные параметры для добавления поста в базу (для FEED)
-    POST_SYNC_LIKES_COUNT_MINIMAL: int = 50
+    DEFAULT_MINIMAL_LIKES_TO_SEARCH_TWEETS: int = 50
     # Минимальный порог вовлеченности поста для выдачи пользователю (для FEED)
     POST_FEED_MINIMAL_ENGAGEMENT_SCORES: int = 200
     # Период времени, через который посты станут неактуальными и их нужно будет удалить. Не ставить меньше чем POST_SYNC_PERIOD_SECONDS

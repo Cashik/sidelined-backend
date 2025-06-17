@@ -280,6 +280,36 @@ def master_update():
         session.close()
 
 
+def create_auto_yaps(project_name: str = None):
+    """
+    Создать auto-yaps (авто-шаблоны постов) для проекта или для всех проектов.
+    """
+    session = SessionLocal()
+    try:
+        if project_name:
+            project = session.query(Project).filter(Project.name == project_name).first()
+            if not project:
+                print(f"Проект с названием '{project_name}' не найден.")
+                return
+            print(f"Создание auto-yaps для проекта: {project.name}")
+            result = asyncio.run(utils.create_project_autoyaps(project, session))
+            print(f"Создано {len(result)} auto-yaps для проекта '{project.name}'")
+        else:
+            projects = session.query(Project).all()
+            if not projects:
+                print("В базе нет проектов.")
+                return
+            total = 0
+            for project in projects:
+                print(f"Создание auto-yaps для проекта: {project.name}")
+                result = asyncio.run(utils.create_project_autoyaps(project, session))
+                print(f"  - создано {len(result)} auto-yaps")
+                total += len(result)
+            print(f"Всего создано {total} auto-yaps для {len(projects)} проектов.")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -328,6 +358,10 @@ def main():
     # Команда обновления xscore пользователей
     update_xscore_parser = subparsers.add_parser('update-users-xscore', help='Обновить xscore для всех пользователей, чьи аккаунты упоминают лидербордские проекты')
 
+    # Команда создания auto-yaps
+    create_auto_yaps_parser = subparsers.add_parser('create-auto-yaps', help='Создать auto-yaps для проекта или всех проектов')
+    create_auto_yaps_parser.add_argument('-n', '--name', required=False, help='Название проекта (если не указано, для всех проектов)')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -352,6 +386,8 @@ def main():
         master_update()
     elif args.command == 'update-users-xscore':
         update_users_xscore()
+    elif args.command == 'create-auto-yaps':
+        create_auto_yaps(args.name)
     else:
         parser.print_help()
 
@@ -367,6 +403,8 @@ python -m src.cli cleanup-old-posts
 python -m src.cli create-admin --login "LOGIN" --password "PASSWORD" --role "ROLE"
 python -m src.cli master-update
 python -m src.cli update-users-xscore
+python -m src.cli create-auto-yaps -n "ProjectName"
+python -m src.cli create-auto-yaps
 """
 
 if __name__ == "__main__":

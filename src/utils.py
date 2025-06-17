@@ -1,4 +1,6 @@
+from enum import Enum
 import functools
+import random
 import re
 import time
 import json
@@ -467,7 +469,7 @@ async def update_project_feed(project: models.Project, from_timestamp: int, db: 
     keywords = project.keywords.split(";")
     keywords = [f'"{kw}"' for kw in keywords if kw]
     keywords_query = " OR ".join(keywords)
-    query = f"({keywords_query}) min_faves:{settings.POST_SYNC_LIKES_COUNT_MINIMAL}"
+    query = f"({keywords_query}) min_faves:{settings.DEFAULT_MINIMAL_LIKES_TO_SEARCH_TWEETS}"
     return await _update_posts_data(project.id, query, from_timestamp, db)
 
 async def update_project_news(project: models.Project, from_timestamp: int, db: Session) -> bool:
@@ -732,51 +734,366 @@ async def generate_pots_examples(generation_settings: schemas.AutoYapsGeneration
     def _prepare_posts(posts: List[schemas.Post], limit: Optional[int] = None, max_len: int = 400) -> str:
         """Concatenates the first `limit` posts, truncating each to `max_len` characters."""
         result = ""
-        for p in posts[:limit if limit else len(posts)]:
+        for i, p in enumerate(posts[:limit if limit else len(posts)]):
             text = p.text[:max(len(p.text), max_len)]
-            result += f"Post from {p.account_name}:\n{text}\n\n"
+            result += f"Post number {i+1} from {p.account_name}:\n{text}\n\n"
         return result
 
     project_feed_str = _prepare_posts(generation_settings.project_feed)
+    logger.info(f"Project feed: {project_feed_str}")
 
+     #logger.info(f"Generate posts examples prompt: \n{SYSTEM_PROMPT}")
+    class Topics(Enum):
+        NEWS = "news"
+        DISCUSSION = "discussion"
+        REFLECTION = "reflection"
+        CALL_TO_ACTION = "call-to-action"
+        OTHER = "other"
+    
+    class Tones(Enum):
+        SKEPTICAL = "skeptical"
+        ENTHUSIASTIC = "enthusiastic"
+        REFLECTIVE = "reflective"
+        NEUTRAL = "neutral"
+        OTHER = "other"
+    
+    class LengthOption(Enum):
+        SHORT = "short. 1-4 sentences"
+        MEDIUM = "medium. 1-2 paragraphs, 5-10 sentences, maybe some lists"
+        LONG = "long. 2-3 paragraphs, 10-20 sentences, maybe some lists, detailed"
+    
+    class YesNo(Enum):
+        YES = "yes"
+        NO = "no"
+    
+    # 3. Response schema
+    class PostSettings(BaseModel):
+        topic: Topics = Field(description="Topic of the tweet")
+        tone: Tones = Field(description="Tone of the tweet")
+        length: LengthOption = Field(description="Length of the tweet. Short: 1-4 sentences, Medium: one long or more than two paragraphs, 4 or more sentences, maybe some lists, Long: 3 or more paragraphs, 5 or more sentences, maybe some lists, detailed")
+        emojis: YesNo = Field(description="Use or not use emojis in the tweet")
+        hashtags: YesNo = Field(description="Use or not use hashtags in the tweet")
+        lists: YesNo = Field(description="Use or not use lists in the tweet")
+        question: YesNo = Field(description="Use or not use opening question in the tweet")
+        
+    class GeneratedPost(BaseModel):
+        settings_number: int = Field(description="Number of the template settings that was used to generate the tweet")
+        full_text: str = Field(description="Full text of the tweet, strictly adhere to the selected template settings")
+        
+    class GeneratePostsResponse(BaseModel):
+        posts: List[GeneratedPost] = Field(description=f"List of {count} tweets that you came up with taking into account all the rules.")
+
+    examples = []
+    examples_str = ""
+    for i in range(0, count+3):
+        current_template = PostSettings(
+            topic=random.choice(list(Topics)),
+            tone=random.choice(list(Tones)),
+            length=random.choice(list(LengthOption)),
+            emojis=random.choice(list(YesNo)),
+            hashtags=YesNo.NO,
+            lists=random.choice(list(YesNo)),
+            question=random.choice(list(YesNo)),
+        )
+        examples.append(current_template)
+        examples_str += f"\nTemplate №{i+1}:{current_template.model_dump_json()}"
+        
     # 2. Prompt (TODO: вынести в PromptService)
     SYSTEM_PROMPT = """
 You are a social media content creator AI agent.
-Your task it to analyze the project feed(in X social network) and generate unique and engaging tweets about the project like a human.
-Important rules:
-- Each tweet should be ≤280 characters, without numbering, quotes, and additional explanations.
+Your task it to analyze some project feed (in X social network) and generate tweets about the project like a human based on one of the given templates.
+
+#Important rules:
 - Return the result strictly in JSON format according to the tool schema, without any additional text.
-- Analyze the project's feed and provide an up-to-date feed.
+- Analyze the project's feed to highlight all topics or lastests news for a new tweets.
 - Write in first or third person, as if you are a regular user.
-- Your tweets be similar to the other tweets in the project feed.
+- You ARE NOT THE PART OF THE PROJECT.
 - Do not mention the project directly (the system will do it) and do not mention anyone.
-- Your tweets must be unique and not repeat one another.
 - Use english language.
 
-What can you write about?
-- current events in the project
-- coverage of discussed topics
-- wishes, suggestions and thoughts about the project
-- forecasts, assessments and other reflections
+#Content advice:
+1. What can you write about?
+1.1. current events in the project
+1.2. coverage of discussed topics
+1.3. wishes, suggestions and thoughts about the project
+1.4. forecasts, assessments and other reflections
+1.5. other topics that discussed in the project feed
+2.What should you not write about?
+2.1. answers to tweets of other users
+2.2. about the fact that you are an AI agent and your posts are based on the feed
+2.3. about the fact that you are using special tools for generating posts
+2.4. unfounded statements and false facts
 
-What should you not write about?
-- answers to tweets of other users
-- about the fact that you are an AI agent and your posts are based on the feed
-- about the fact that you are using special tools for generating posts
-- unfounded statements and false facts
-    """
+#Tweet variety guidelines:
+1. Allways use `\\n` for new lines in this cases:
+- for lists
+- after opening question
+- between paragraphs or not related sentences
+- before hashtags
+- to separate important information
+2. Strict to the selected template settings.
 
-    USER_PROMPT = f"""# Project feed
-{project_feed_str}
-# End of project feed
-IMPORTANT: follow all rules specified in the system prompt.
+
+#Examples of good tweets:
+##Short:
+```
+hyperliquid needs a mobile app
+
+they already nailed product and UX on desktop
+
+the moment they go mobile with that same experience, it’s the end of cex
+
+—-
+
+Bitcoin is about to break their ATH, TWICE IN THE SAME YEAR, yet my entire TL is sad
+
+Why?
+
+—---
+
+collected some crypto art on @ethereum over the last few months
+
+has been fun to go back and spend time with older collections, incl a lot of code-based work onchain
+
+will keep sharing a few of my new favs 
+
+—----
+
+You can clearly tell that most crypto VCs are mostly beta chasers. 
+
+I've had like 5 different conversations with people from 5 different funds and they're all trying to search for 'The next Hyperliquid' without asking any questions about the underlying dynamics of perps
+
+—-----
+
+
+who are the strongest emerging founders on @solana right now?
+
+what are they building?
+
+
+—-
+```
+##Medium:
+```
+crypto and free-market libertarianism are actually somewhat uneasy bedfellows
+
+imo part of the power cryptosystems is the way they make us *less* free...by enabling binding commitments, unbreachable contracts....
+
+hyper-free-markets thinking leads to the "efficient breach" theory of contract, where it's good to be able to break your agreements if it's profit-maximizing...at least part of the use-case of crypto is creating agreements you have to stick with even if not profit-maximizing...
+
+overlap between market maxis and crypto maxis is only partial imo, if you really think deeply about it . .
+
+—--------
+
+Nothing PISSES me off more than when bears do a whole personality switch up and start acting bullish.
+
+*Posts pic of BTC tape* — “Hmmm interesting. Looks healthy! Think we have a real shot to go up from here! Things are finally looking promising!”
+
+What?
+
+Didn’t you JUST dedicate weeks of your life to bearposting?
+
+What do you mean it “looks good now” when we’re about to break ATH you stupid fuck?
+
+
+—-----
+
+100 supply Overworld Keys went to 18e in the worst bear market for NFTs for a game that literally never existed and a company that didn’t deliver *anything*
+
+My gut is Ethos Validators are still undervalued. Hardest thing about the first mover in a new primitive or vertical is pricing because there are no useful/valid comps.
+
+Leads to extreme price inefficiency in practice most of the time.
+
+ico still has his airdropped validator
+
+—------
+
+just deposited some $$ in @katana to scoop some $KAT 
+
+- katana is a defi zkEVM chain incubated by polygon labs & gsr 
+- katana uses conduit to batch and roll up txs off-chain, then publishes succinct zk proofs on-chain 
+- pre-deposit phase allows you to mint krates (loot-boxes) 
+- you park eth, usdc, usdt, or wbtc and get krates 
+- the assets you deposit go straight to yearn v3 vaults for baseline yield (these vaults optimise strategies across various defi strategies across morpho, sushi, vertex) 
+- vaultbridge re-funnels bridged tvl & network fees back into those same vaults  
+- they've just launched a leaderboard on kaito (10m KAT will be distributed as the total prize pool for yappers)
+
+—----
+
+My friend wants to buy a multifamily house
+
+He thinks it will be a good investment, a good business
+
+I disagree completely
+
+After going through my own experience with property management - I am now 1000% all in on the
+
+"Bitcoin is better than real estate in every way" philosophy
+
+```
+##Long:
+```
+HODL is dead.
+
+My biggest mistake this cycle was blindly holding ETH.
+
+Even when my No 1. bullish case for $ETH failed to materialize - super high yields on ETH thanks to Restaking
+
+I love crypto and trading due to its brutal honesty: if you're right = profit, wrong = loss.
+
+But I got complacent with $ETH as narratives shift fast:
+
+- "Ultrasound money" & ETH's ESG edge... Gone.
+
+- Restaking superyields didn't materialize.
+
+- ETH modular vs SOL's monolithic narrative: SOL proved stronger at least short run.
+
+I ignored changing realities, sticking to HODL instead of adapting.
+
+This cycle was more difficult than the last and crypto moves too quickly for passive holds (maybe except BTC).
+
+Profits now come from more active trading, not hoping assets rebound "someday."
+
+$ETH terrible under-performance was a wake up call.
+
+Thankfully rotating to $HYPE saved me.
+
+Still, $ETH has a place in everyone's portfolio and EF is not complacent anymore.
+
+But emerging "Stablecoin & RWAs" L1s with gas abstraction is another growing risk for ETH.
+
+Happy $HYPE ATH for those who celebrate.
+
+
+—----------------------------
+
+
+Habibis, listen up
+
+Big news from @peaq that’s been quietly in the works for a while:
+
+They’ve officially launched the world’s first Machine Economy Free Zone (MEFZ) in the UAE - a real-world sandbox to test, deploy, and scale machine economy applications with full regulatory and investment backing.
+
+For those who don’t realize how massive this is:
+
+This marks another huge leap forward in peaq’s mission to build the universal coordination layer for DePINs, machines, and robots - now grounded in a physical zone with clear regulation, real adoption paths, R&D infrastructure, and investment / liquidity pipelines.
+
+In my opinion, this just made peaq orders of magnitude more relevant for anyone building in DePIN, DePAI, robotics, and machine economy verticals.
+
+Expecting the peaqosystem to experience explosive growth from here - with fresh use cases, stronger network effects, and more real-world traction than ever.
+
+And it’ll be all powered by $PEAQ at the core.
+
+
+—----
+
+
+In case you missed it: the big money is coming for your $ETH - aggressively.
+
+Yesterday alone saw over $125M in net inflows into spot ETH ETFs, which marks the largest daily inflow in the past 4 months.
+
+But more impressively, ETH ETFs are now on a record-breaking streak of consecutive daily inflows, totaling over $1 billion in 17 days. 
+
+That’s not just bullish - that’s conviction.
+
+For the first time ever, total assets under management have now exceeded $10 billion.
+
+Macro. Narratives. Fundamentals. Ecosystem. Execution.
+
+Everything is aligning for Ethereum, and smart money is clearly watching.
+
+Wouldn’t be surprised if June/July ends up being the last time we ever see ETH under $3K.
+
+—-----
+
+Yesterday we made a post about a small number of OS1 features being depreciated.
+
+I understand that some of you used these regularly & feel passionately about them - especially Deals.
+
+Decisions like these are never made lightly. But there are reasons for them that aren't always obvious. With Deals as an example, the functionality simply doesn't work with ERC721-C contracts where royalties are enforced. As more and more of these contracts have been deployed, the product felt increasingly broken and inconsistently useful.
+
+We might reconsider adding back some of these features in the future. But when you're building at this level of scale and velocity, we sometimes need to make difficult decisions re: prioritization.
+
+I promise you, we have some truly wonderful things in the works.
+
+Please keep the feedback coming. If you love something about OpenSea, be vocal about it. We're listening and will continue to take these things into account as we build out our future roadmap.
+
+
+—---
+main reason not to fade ethos imo is because the market often doesnt know how to price weird/novel tokens
+
+as far as i know this is the only reputation product with some traction and thus has little to no live comps
+
+compare this to gaming tokens or ethereum L2s which comparatively have very clear ceilings from all the fresh tokens introduced in the last 2 years
+
+platform still has obvious issues though
+
+the list of people with the highest reputation is mostly a circlejerk of KOLs who became power users and the recent "listings" feature is a bit of a meme since you can't extract meaningful signal if there's nothing at stake when users vote bullish or bearish
+
+think ethos ends up surprising many as long as the founder doesnt go after  farmers from 3rd world countries again
+
+
+—---
+
+Many people think that it's bearish that Ethereum is trying to win it all (settlement, execution and SoV).
+
+I believe that Ethereum will win it all and winning all 3 of these prongs is incredibly bullish and why ETH is going to one day be worth $100 trillion+.
+
+Ethereum already won settlement - it's the world's greatest, most decentralised, most secure, most censorship-resistant network to ever exist. Zero downtime. Ultimate reliability.
+
+Ethereum will win execution with its layer 2 ecosystem offering the fastest and cheapest transactions possible while settling on the world's greatest network. The ultimate user experience.
+
+ETH will become the greatest store of value asset to ever exist giving holders the absolute strongest property rights that humanity has ever known. There is no second best.
+
+The world computer is Ethereum and the ticker is ETH.
+
+
+
+—-----
+
+
+
+distribution is not destiny
+
+look at TON, who is squandering the biggest distribution advantage in crypto history
+
+telegram is the only platform every crypto-native trader and builder lives on. not to mention a billion other retail users
+
+and yet the chain is soulless. no presence. no story. no purpose. 
+
+the success stories of the ecosystem (notcoin, hamster kombat, catizen) are all the same click-to-earn slop. the chain isn't evm compatible, so they don't even get copy-paste evm slop. there isn't a single ton-native app worth getting excited about
+
+they even fucked up the one thing that's working, tg gifts / stickers, to the extent that 80% of the volume is now happening on p2p offchain marketplaces
+
+it's clear telegram's distribution is extremely valuable. tg trading bots printed nine figures last year, completely ignoring ton and offering assets on other chains
+
+the walled garden around mini apps could still work - it's not like tg users are going anywhere
+
+but distribution is leverage, not destiny
+
+zero times a million is still zero
+
+
+```
+#End of examples. Do not use information from examples in your tweets. It's just for you to understand the best style of the tweets.
+
 """
 
-    #logger.info(f"Generate posts examples prompt: \n{SYSTEM_PROMPT}")
+    USER_PROMPT = f"""
+#Project feed:
+{project_feed_str}
+#End of project feed.
+"""
 
-    # 3. Response schema
-    class GeneratePostsResponse(BaseModel):
-        posts: List[str] = Field(description=f"List of {count} tweets, each ≤280 characters")
+    USER_PROMPT2 = f"""
+For each of provided templates you need to generate a tweet.    
+#Templates:
+{examples_str}
+IMPORTANT:  and summarize one or more topic from the project feed!
+1. Full text MUST be adhere to the selected settings!
+2. Each new tweet about something else.  
+"""
 
     # 4. Инициализация LLM
     model_provider = ""
@@ -794,27 +1111,27 @@ IMPORTANT: follow all rules specified in the system prompt.
         model_provider=model_provider,
         api_key=api_key,
         temperature=0.7,
-        max_tokens=512,
+        max_tokens=2048,
     ).with_structured_output(GeneratePostsResponse)
 
     try:
         result: GeneratePostsResponse = await llm.ainvoke([
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": USER_PROMPT},
+            {"role": "user", "content": USER_PROMPT2},
         ])
     except ValidationError as e:
         # Попытка ретрая с более жёстким системным промптом
-        strict_prompt = SYSTEM_PROMPT + "\nВНИМАНИЕ: твой ответ ДОЛЖЕН быть JSON, полностью соответствовать схеме, иначе ошибка."
+        strict_prompt = SYSTEM_PROMPT + "\nIMPORTANT: Your response MUST be valid JSON that fully complies with the schema, otherwise an error will occur."
         result: GeneratePostsResponse = await llm.ainvoke([
             {"role": "system", "content": strict_prompt},
-            {"role": "user", "content": USER_PROMPT},
         ])
     # 5. Пост-обработка и финальная валидация длины твитов
     cleaned: List[str] = []
     for tw in result.posts:
-        tw_clean = tw.strip().replace("\n", " ")
-        if len(tw_clean) > 280:
-            tw_clean = tw_clean[:277] + "…"
+        tw_clean = tw.full_text
+        tw_settings: PostSettings = examples[tw.settings_number-1]
+        logger.info(f"Generated tweet:\nTemplate:\n {tw_settings.model_dump_json()}\nFull text:\n {tw_clean}\n\n")
         cleaned.append(tw_clean)
     # гарантия нужного количества
     if len(cleaned) != count:
@@ -907,9 +1224,8 @@ Important rules for you:
 1. Rewrite the tweet — do not reply to it.
 2. Follow the supplied style guidelines exactly for every version.
 3. Generate several variants, making each one clearly different from both the original tweet and the other variants.
-4. Each variant must not exceed 280 characters.
-5. Each variant must be written in the SAME LANGUAGE as the ORIGINAL TWEET.
-6. Return the result strictly in JSON format according to the tool schema.
+4. Each variant must be written in the SAME LANGUAGE as the ORIGINAL TWEET.
+5. Return the result strictly in JSON format according to the tool schema.
     """
     USER_PROMPT = f"Original tweet to personalize:\n\"{original_text}\""
     logger.info(f"Personalization prompt: \n{SYSTEM_PROMPT}\n{USER_PROMPT}")
