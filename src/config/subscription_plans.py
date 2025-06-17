@@ -31,12 +31,12 @@ project_tokens = {
 pro_plan_requirements = [
     schemas.TokenRequirement(
         token=project_tokens["RIZ"],
-        balance=1000,
+        balance=20_000,
         buy_link="https://aerodrome.finance/swap?from=eth&to=0x67543cf0304c19ca62ac95ba82fd4f4b40788dc1&chain0=8453&chain1=8453"
     ),
     schemas.TokenRequirement(
         token=project_tokens["wRIZ"],
-        balance=1000,
+        balance=15_000,
         buy_link="https://stake.rivalz.ai"
     ),
     schemas.TokenRequirement(
@@ -99,12 +99,12 @@ pro_plan_requirements = [
 ultra_plan_requirements = [
     schemas.TokenRequirement(
         token=project_tokens["RIZ"],
-        balance=10_000,
+        balance=150_000,
         buy_link="https://aerodrome.finance/swap?from=eth&to=0x67543cf0304c19ca62ac95ba82fd4f4b40788dc1&chain0=8453&chain1=8453"
     ),
     schemas.TokenRequirement(
         token=project_tokens["wRIZ"],
-        balance=10_000,
+        balance=100_000,
         buy_link="https://stake.rivalz.ai"
     ),
     schemas.TokenRequirement(
