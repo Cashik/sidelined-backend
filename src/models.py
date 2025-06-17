@@ -152,6 +152,8 @@ class Project(Base):
     icon_url = Column(String, nullable=False, default="", server_default="")
     keywords = Column(String, nullable=False)
     
+    search_min_likes = Column(Integer, nullable=True, default=None)
+    
     is_leaderboard_project = Column(Boolean, nullable=False, default=False, server_default="false")
     
     # Relationships

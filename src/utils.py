@@ -469,7 +469,8 @@ async def update_project_feed(project: models.Project, from_timestamp: int, db: 
     keywords = project.keywords.split(";")
     keywords = [f'"{kw}"' for kw in keywords if kw]
     keywords_query = " OR ".join(keywords)
-    query = f"({keywords_query}) min_faves:{settings.DEFAULT_MINIMAL_LIKES_TO_SEARCH_TWEETS}"
+    min_likes = project.search_min_likes if project.search_min_likes is not None else settings.DEFAULT_MINIMAL_LIKES_TO_SEARCH_TWEETS
+    query = f"({keywords_query}) min_faves:{min_likes}"
     return await _update_posts_data(project.id, query, from_timestamp, db)
 
 async def update_project_news(project: models.Project, from_timestamp: int, db: Session) -> bool:
@@ -841,7 +842,7 @@ hyperliquid needs a mobile app
 
 they already nailed product and UX on desktop
 
-the moment they go mobile with that same experience, it’s the end of cex
+the moment they go mobile with that same experience, it's the end of cex
 
 —-
 
@@ -887,18 +888,18 @@ overlap between market maxis and crypto maxis is only partial imo, if you really
 
 Nothing PISSES me off more than when bears do a whole personality switch up and start acting bullish.
 
-*Posts pic of BTC tape* — “Hmmm interesting. Looks healthy! Think we have a real shot to go up from here! Things are finally looking promising!”
+*Posts pic of BTC tape* — "Hmmm interesting. Looks healthy! Think we have a real shot to go up from here! Things are finally looking promising!"
 
 What?
 
-Didn’t you JUST dedicate weeks of your life to bearposting?
+Didn't you JUST dedicate weeks of your life to bearposting?
 
-What do you mean it “looks good now” when we’re about to break ATH you stupid fuck?
+What do you mean it "looks good now" when we're about to break ATH you stupid fuck?
 
 
 —-----
 
-100 supply Overworld Keys went to 18e in the worst bear market for NFTs for a game that literally never existed and a company that didn’t deliver *anything*
+100 supply Overworld Keys went to 18e in the worst bear market for NFTs for a game that literally never existed and a company that didn't deliver *anything*
 
 My gut is Ethos Validators are still undervalued. Hardest thing about the first mover in a new primitive or vertical is pricing because there are no useful/valid comps.
 
@@ -971,19 +972,19 @@ Happy $HYPE ATH for those who celebrate.
 
 Habibis, listen up
 
-Big news from @peaq that’s been quietly in the works for a while:
+Big news from @peaq that's been quietly in the works for a while:
 
-They’ve officially launched the world’s first Machine Economy Free Zone (MEFZ) in the UAE - a real-world sandbox to test, deploy, and scale machine economy applications with full regulatory and investment backing.
+They've officially launched the world's first Machine Economy Free Zone (MEFZ) in the UAE - a real-world sandbox to test, deploy, and scale machine economy applications with full regulatory and investment backing.
 
-For those who don’t realize how massive this is:
+For those who don't realize how massive this is:
 
-This marks another huge leap forward in peaq’s mission to build the universal coordination layer for DePINs, machines, and robots - now grounded in a physical zone with clear regulation, real adoption paths, R&D infrastructure, and investment / liquidity pipelines.
+This marks another huge leap forward in peaq's mission to build the universal coordination layer for DePINs, machines, and robots - now grounded in a physical zone with clear regulation, real adoption paths, R&D infrastructure, and investment / liquidity pipelines.
 
 In my opinion, this just made peaq orders of magnitude more relevant for anyone building in DePIN, DePAI, robotics, and machine economy verticals.
 
 Expecting the peaqosystem to experience explosive growth from here - with fresh use cases, stronger network effects, and more real-world traction than ever.
 
-And it’ll be all powered by $PEAQ at the core.
+And it'll be all powered by $PEAQ at the core.
 
 
 —----
@@ -995,7 +996,7 @@ Yesterday alone saw over $125M in net inflows into spot ETH ETFs, which marks th
 
 But more impressively, ETH ETFs are now on a record-breaking streak of consecutive daily inflows, totaling over $1 billion in 17 days. 
 
-That’s not just bullish - that’s conviction.
+That's not just bullish - that's conviction.
 
 For the first time ever, total assets under management have now exceeded $10 billion.
 
@@ -1003,7 +1004,7 @@ Macro. Narratives. Fundamentals. Ecosystem. Execution.
 
 Everything is aligning for Ethereum, and smart money is clearly watching.
 
-Wouldn’t be surprised if June/July ends up being the last time we ever see ETH under $3K.
+Wouldn't be surprised if June/July ends up being the last time we ever see ETH under $3K.
 
 —-----
 

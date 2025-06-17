@@ -278,6 +278,7 @@ class ProjectAdmin(BaseProtectedView):
         StringField("url", label="Project URL", required=False, help_text="Official project website"),
         StringField("icon_url", label="Icon URL", required=False, help_text="Icon URL of the project (can be taken from the coingecko.com or oficial site)."),
         TextAreaField("keywords", label="Keywords", required=True, help_text="Search keywords (; separated). Example: 'keyword1;key word2;@keyword3'"),
+        IntegerField("search_min_likes", label="Min likes for search", required=False, help_text="Leave empty to use the default value for this project."),
         BooleanField("is_leaderboard_project", label="Leaderboard", help_text="Является ли проект лидербордом"),
         HasMany("accounts", label="Related Accounts", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
@@ -296,7 +297,9 @@ class ProjectAdmin(BaseProtectedView):
             and role != enums.AdminRole.ADMIN.value
         ):
             raise FormValidationError({"is_leaderboard_project": "Только администратор может изменять это поле."})
-        # Можно добавить другие проверки, если нужно
+        # Обработка пустых значений для новых полей
+        if "search_min_likes" in data and (data["search_min_likes"] == "" or data["search_min_likes"] is None):
+            data["search_min_likes"] = None
         
     async def before_create(self, request: Request, data: dict, obj: Any) -> None:
         # Только админ может выставлять is_leaderboard_project при создании
@@ -307,6 +310,9 @@ class ProjectAdmin(BaseProtectedView):
             and role != enums.AdminRole.ADMIN.value
         ):
             raise FormValidationError({"is_leaderboard_project": "Только администратор может устанавливать это поле."})
+        # Обработка пустых значений для новых полей
+        if "search_min_likes" in data and (data["search_min_likes"] == "" or data["search_min_likes"] is None):
+            data["search_min_likes"] = None
 
 
 class SocialAccountAdmin(BaseProtectedView):

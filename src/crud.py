@@ -597,127 +597,11 @@ async def create_social_post_statistic(statistic: models.SocialPostStatistic, db
     db.refresh(statistic)
     return statistic
 
-async def get_posts(
-    filter: schemas.FeedFilter,
-    sort_type: enums.SortType,
-    db: Session,
-    limit: int = 100,
-) -> List[models.SocialPost]:
-    """
-    Возвращает отфильтрованную и отсортированную ленту постов.
-
-    Параметры
-    ---------
-    filter : schemas.FeedFilter
-        Условия выборки.
-    sort_type : enums.SortType
-        Тип сортировки (NEW | POPULAR).
-    db : Session
-        SQLAlchemy-сессия.
-    limit : int
-        Максимальное число постов (по ТЗ = 100).
-    """
-
-    # Если оба флага выключены – нечего отдавать
-    if not filter.include_project_sources and not filter.include_other_sources:
-        return []
-
-    day_ago = utils_base.now_timestamp() - 60 * 60 * 24
-
-    # базовый SELECT
-    query = (
-        select(models.SocialPost)
-        .options(
-            joinedload(models.SocialPost.statistic),
-            joinedload(models.SocialPost.account).joinedload(models.SocialAccount.projects),
-        )
-        .where(models.SocialPost.posted_at >= day_ago)
-    )
-
-    # --- фильтр по project_ids через EXISTS, чтобы избежать дубликатов ---
-    if filter.projects_ids:
-        mention_exists = (
-            select(literal(1))
-            .select_from(models.ProjectMention)
-            .where(
-                and_(
-                    models.ProjectMention.post_id == models.SocialPost.id,
-                    models.ProjectMention.project_id.in_(filter.projects_ids),
-                )
-            )
-            .exists()
-        )
-        query = query.where(mention_exists)
-
-    # --- фильтр по типу источников (привязан / не привязан к проекту) ---
-    if filter.include_project_sources != filter.include_other_sources:
-        account_link_exists = (
-            select(literal(1))
-            .select_from(models.ProjectAccountStatus)
-            .where(models.ProjectAccountStatus.account_id == models.SocialPost.account_id)
-            .exists()
-        )
-
-        if filter.include_project_sources:
-            query = query.where(account_link_exists)
-        else:
-            query = query.where(~account_link_exists)
-
-    # --- фильтр по engagement score ---
-    if filter.include_other_sources:
-        # Коррелированный подзапрос: берём только одну – самую свежую – статистику для поста
-        latest_score_subq = (
-            select(
-                (
-                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
-                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
-                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 3
-                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
-                )
-            )
-            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
-            .order_by(desc(models.SocialPostStatistic.created_at))
-            .limit(1)
-            .scalar_subquery()
-        )
-        query = query.where(latest_score_subq >= settings.POST_FEED_MINIMAL_ENGAGEMENT_SCORES)
-
-    # --- сортировка ---
-    if sort_type == enums.SortType.NEW:
-        query = query.order_by(desc(models.SocialPost.posted_at))
-    elif sort_type == enums.SortType.POPULAR:
-        # Коррелированный подзапрос: берём только одну – самую свежую – статистику для поста
-        latest_score_subq = (
-            select(
-                (
-                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
-                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
-                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
-                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
-                )
-            )
-            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
-            .order_by(desc(models.SocialPostStatistic.created_at))
-            .limit(1)
-            .scalar_subquery()
-        )
-
-        popularity_expr = func.coalesce(latest_score_subq, 0)
-        query = query.order_by(desc(popularity_expr))
-    else:
-        # На случай добавления новых типов сортировки в будущем
-        raise exceptions.BusinessError(code="invalid_sort_type", message="Invalid sort type")
-
-    # --- лимит ---
-    query = query.limit(limit)
-
-    # выполняем
-    result = db.execute(query).unique().scalars().all()
-    return result
 
 async def get_projects_all(db: Session) -> List[models.Project]:
     stmt = select(models.Project)
     return db.execute(stmt).scalars().all()
+
 
 async def get_projects_selected_by_user(user: models.User, db: Session) -> List[models.Project]:
     stmt = (
@@ -726,6 +610,7 @@ async def get_projects_selected_by_user(user: models.User, db: Session) -> List[
         .where(models.UserSelectedProject.user_id == user.id)
     )
     return db.execute(stmt).scalars().all()
+
 
 async def select_projects(request: schemas.SelectProjectsRequest, user: models.User, db: Session) -> None:
     """Обновляет список выбранных проектов для пользователя"""
@@ -773,6 +658,7 @@ def create_or_update_project_by_name(session: Session, project: models.Project) 
         session.refresh(project)
         return project
 
+
 def create_or_update_social_media_by_social_name(session: Session, account: models.SocialAccount) -> models.SocialAccount:
     """
     Создает или обновляет аккаунт социальной сети по его social_login.
@@ -796,6 +682,7 @@ def create_or_update_social_media_by_social_name(session: Session, account: mode
         session.commit()
         session.refresh(account)
         return account
+
 
 def create_or_update_project_account_status(
     session: Session,
@@ -832,6 +719,7 @@ def create_or_update_project_account_status(
         session.commit()
         session.refresh(status)
         return status
+
 
 async def delete_old_posts(db: Session, older_than_timestamp: int) -> int:
     """
@@ -875,6 +763,7 @@ async def delete_old_posts(db: Session, older_than_timestamp: int) -> int:
     db.commit()
     
     return result.rowcount
+
 
 async def get_brain_settings(user: models.User, session: Session) -> schemas.PersonalizationSettings:
     """
@@ -1010,6 +899,7 @@ async def create_post_examples(templates: List[schemas.PostExampleCreate], db: S
     
     return result
 
+
 async def get_project_feed_posts(
     db: Session,
     project_ids: List[int],
@@ -1042,29 +932,21 @@ async def get_project_feed_posts(
             .where(models.ProjectAccountStatus.project_id.in_(project_ids))
         )
         query = query.where(~models.SocialPost.account_id.in_(account_ids_subq))
-    # Сортировка
-    if sort_type == enums.SortType.NEW:
-        query = query.order_by(desc(models.SocialPost.posted_at))
-    elif sort_type == enums.SortType.POPULAR:
-        latest_score_subq = (
-            select(
-                (
-                    func.coalesce(models.SocialPostStatistic.views, 0) * 0.001
-                    + func.coalesce(models.SocialPostStatistic.likes, 0) * 1
-                    + func.coalesce(models.SocialPostStatistic.reposts, 0) * 2
-                    + func.coalesce(models.SocialPostStatistic.comments, 0) * 4
-                )
-            )
-            .where(models.SocialPostStatistic.post_id == models.SocialPost.id)
-            .order_by(desc(models.SocialPostStatistic.created_at))
-            .limit(1)
-            .scalar_subquery()
-        )
-        popularity_expr = func.coalesce(latest_score_subq, 0)
-        query = query.order_by(desc(popularity_expr))
-    query = query.limit(limit)
     result = db.execute(query).unique().scalars().all()
+    # Сортируем по engagement
+    from src.utils import calculate_post_engagement_score
+    def get_engagement(post):
+        if post.statistic:
+            stats = max(post.statistic, key=lambda s: s.created_at)
+            return calculate_post_engagement_score(stats.views, stats.likes, stats.reposts, stats.comments)
+        return 0
+    result.sort(key=get_engagement, reverse=True)
+    result = result[:limit]
+    # Если нужна сортировка по времени (sort_type == NEW), сортируем по времени
+    if sort_type == enums.SortType.NEW:
+        result.sort(key=lambda p: p.posted_at, reverse=True)
     return result
+
 
 async def get_project_news_posts(
     db: Session,
@@ -1125,7 +1007,8 @@ async def get_account_payouts(db: Session, project_id: int, account_id: int) -> 
         models.ScorePayout.project_id == project_id,
         models.ScorePayout.social_account_id == account_id
     ).all()
-    
+
+
 async def get_project_leaderboard_last_ts(db: Session, project_id: int) -> int:
     """
     Получение timestamp последнего обновления leaderboard для проекта.
