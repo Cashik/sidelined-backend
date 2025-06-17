@@ -21,6 +21,7 @@ from src.services.prompt_service import PromptService
 from src.config import ai_models, subscription_plans
 from src.services.x_api_service import XApiService
 from src.services.x_oauth_service import XOAuthService
+from src.config.subscription_plans import get_subscription_plan
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -162,20 +163,32 @@ class YapsPersonalizationResponse(BaseModel):
     variants: List[str] = Field(description="Few variants of personalized tweets")
     
 @router.post("/personalize", response_model=YapsPersonalizationResponse)
-async def personalize(request: YapsPersonalizationRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def personalize(
+    request: YapsPersonalizationRequest,
+    user: models.User = Depends(get_current_user),
+    user_subscription_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
+    db: Session = Depends(get_session)
+):
     """
     Персонализация текста для авто-постов
     """
-    # TODO: снимать кредиты с пользователя
+    PERSONALIZATION_CREDITS_COST = 1
+    # Получаем тариф пользователя по актуальному типу подписки
+    user_subscription = get_subscription_plan(user_subscription_id)
+    # Проверяем лимит кредитов
+    if user.used_credits_today + PERSONALIZATION_CREDITS_COST > user_subscription.max_credits:
+        raise exceptions.APIError(code="out_of_credits", message="Out of credits. Try again tomorrow.", status_code=403)
+
     # Получаем настройки персонализации пользователя
     personalization_settings = await crud.get_brain_settings(user, db)
-    
     # Генерируем 3 персонализированных варианта
     variants = await utils.generate_personalized_tweets(
         original_text=request.text,
         personalization_settings=personalization_settings,
         count=3
     )
+    # Списываем кредиты
+    await crud.change_user_credits(db, user.id, PERSONALIZATION_CREDITS_COST)
     return YapsPersonalizationResponse(text=variants[0], variants=variants)
 
     
