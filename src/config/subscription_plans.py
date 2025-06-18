@@ -94,6 +94,28 @@ pro_plan_requirements = [
         ),
         balance=100_000
     ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0x548D3B444da39686d1a6F1544781d154e7cD1EF7",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="sKAITO",
+            name="Staked Kaito"
+        ),
+        balance=100
+    ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.BASE,
+            address="0x98d0baa52b2D063E780DE12F615f963Fe8537553",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="KAITO",
+            name="Kaito"
+        ),
+        balance=100
+    ),
 ]
 
 ultra_plan_requirements = [
