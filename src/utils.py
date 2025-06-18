@@ -1496,11 +1496,11 @@ async def update_project_leaderboard(project: models.Project, db: Session):
                 user.payout.min_loyalty = 0
             else:
                 # сохраняем прошлые значения
-                user.payout.first_post_at = last_payout.first_post_at
-                user.payout.last_post_at = last_payout.last_post_at 
-                user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at
-                user.payout.loyalty_points = last_payout.loyalty_points
-                user.payout.min_loyalty = last_payout.min_loyalty
+                user.payout.first_post_at = last_payout.first_post_at if last_payout.first_post_at is not None else now_timestamp()
+                user.payout.last_post_at = last_payout.last_post_at if last_payout.last_post_at is not None else now_timestamp()
+                user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at if last_payout.weekly_streak_start_at is not None else now_timestamp()
+                user.payout.loyalty_points = last_payout.loyalty_points if last_payout.loyalty_points is not None else 0
+                user.payout.min_loyalty = last_payout.min_loyalty if last_payout.min_loyalty is not None else 0
         
             ### рассчитываем бонусы
             ## бонус за первую неделю
