@@ -1032,3 +1032,30 @@ async def get_project_leaderboard_last_ts(db: Session, project_id: int) -> int:
     return db.query(models.ProjectLeaderboardHistory).filter(
         models.ProjectLeaderboardHistory.project_id == project_id
     ).order_by(desc(models.ProjectLeaderboardHistory.created_at)).first().created_at
+    
+    
+async def get_user_by_social_account_id(db: Session, social_account_id: int) -> models.User | None:
+    """
+    Получение пользователя по id социального аккаунта.
+    Ищем пользователя с таким же установленым twitter_login как и у социального аккаунта.
+    """
+    social_account = db.query(models.SocialAccount).filter(
+        models.SocialAccount.id == social_account_id
+    ).first()
+    if not social_account:
+        return None
+    return db.query(models.User).filter(
+        models.User.twitter_login == social_account.social_login
+    ).first()
+    
+    
+async def get_last_payout_by_social_account_id(db: Session, social_account_id: int, project_id: int) -> models.ScorePayout | None:
+    """
+    Получение последнего payout для аккаунта в проекте.
+    """
+    return db.query(models.ScorePayout).filter(
+        models.ScorePayout.social_account_id == social_account_id,
+        models.ScorePayout.project_id == project_id
+    ).order_by(desc(models.ScorePayout.created_at)).first()
+    
+    

@@ -452,6 +452,17 @@ class ScorePayout(Base):
     base_score = Column(Float, nullable=False) # базовый рейтинг, на основе текущего mindshare
     
     # TODO: добавить колонки для расчета бонусов
+    new_posts_count = Column(Integer, nullable=True, default=None, server_default=None)
+    # дата первого поста об проекте лидерборда с момента привязки юзером 
+    first_post_at = Column(Integer, nullable=True, default=None, server_default=None)
+    # дата последнего упоминания об проекте лидерборда с момента привязки юзером
+    last_post_at = Column(Integer, nullable=True, default=None, server_default=None)
+    # дата начала последнего недельного стрика
+    weekly_streak_start_at = Column(Integer, nullable=True, default=None, server_default=None)
+    # очки лояльности. Даются за присутствие в майндшере. Отнимаются за неактивность.
+    loyalty_points = Column(Float, nullable=True, default=None, server_default=None)
+    # отметка лояльности ниже которой нельзя опуститься. Повышается при достижении некоторых значений.
+    min_loyalty = Column(Integer, nullable=True, default=None, server_default=None)
     
     # Relationships
     social_account = relationship("SocialAccount", back_populates="scores")

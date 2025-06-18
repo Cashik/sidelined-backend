@@ -311,7 +311,7 @@ async def disconnect_x_account(user: models.User = Depends(get_current_user), db
 
 
 class Multiplier(BaseModel):
-    value: int
+    value: float
     multiplier: float
     
 class MindshareTable(BaseModel):
@@ -320,7 +320,7 @@ class MindshareTable(BaseModel):
     yesterday: float
 
 class PersonalResultsResponse(BaseModel):
-    total_score: int
+    total_score: float
     mindshare: MindshareTable
     loyalty_bonus: Multiplier # todo: разобраться с этим параметром
     streak_bonus: Multiplier
@@ -370,6 +370,7 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
     #social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == "Calderaxyz").first()
     if not social_account:
         # такого быть не должно, но если так, то возвращаем 0
+        logger.error(f"User {user.id} has no social_account")
         return PersonalResultsResponse(
             total_score=0,
             mindshare=MindshareTable(current=0, today=0, yesterday=0),
@@ -382,6 +383,7 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
     payouts = await crud.get_account_payouts(db, project.id, social_account.id)
     payouts.sort(key=lambda p: p.project_leaderboard_history.created_at)
     if not payouts:
+        logger.error(f"User {user.id} has no payouts for project {project.id}")
         return PersonalResultsResponse(
             total_score=0,
             mindshare=MindshareTable(current=0, today=0, yesterday=0),
@@ -400,16 +402,23 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
     all_time_mindshare = _calc_mindshare(payouts, 0, end_ts)
     logger.info(f"all_time_mindshare: {all_time_mindshare}")
     
+    # отображаем мультипликаторы по последнему payout
+    last_payout = payouts[-1]
+    loyalty_bonus = Multiplier(value=last_payout.loyalty_points, multiplier=1.0)
+    streak_bonus = Multiplier(value=(now_ts - last_payout.weekly_streak_start_at)//(86400*7), multiplier=1.0)
+    new_author_bonus = last_payout.new_posts_count>0
+    new_author_bonus = Multiplier(value=int(new_author_bonus), multiplier=(10 if new_author_bonus else 1))
+    
     return PersonalResultsResponse(
-        total_score=int(sum(p.score for p in payouts)),
+        total_score=sum(p.score for p in payouts),
         mindshare=MindshareTable(
             current=payouts[-1].mindshare, 
             today=today_mindshare, 
             yesterday=yesterday_mindshare
         ),
-        loyalty_bonus=Multiplier(value=0, multiplier=1.0),
-        streak_bonus=Multiplier(value=0, multiplier=1.0),
-        new_author_bonus=Multiplier(value=0, multiplier=1.0)
+        loyalty_bonus=loyalty_bonus,
+        streak_bonus=streak_bonus,
+        new_author_bonus=new_author_bonus
     )
     
 class CoinMarketCapResponse(BaseModel):
