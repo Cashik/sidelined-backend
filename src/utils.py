@@ -1426,8 +1426,8 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         period_start = last_history.end_ts+1
         logger.info(f"[Leaderboard] Last history found: {period_start}")
     else:
-        period_start = now_timestamp() - 86400
-        logger.info(f"[Leaderboard] No history found, using last 24h: {period_start}")
+        period_start = now_timestamp() - 60*60*4 # 4 hours
+        logger.info(f"[Leaderboard] No history found, using last 4h: {period_start}")
     period_end = now_timestamp()
     period_seconds = period_end - period_start
 

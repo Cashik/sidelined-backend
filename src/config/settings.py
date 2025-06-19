@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     
     # Redis settings
-    REDIS_URL: str
+    REDIS_URL: str = "redis://sidelined_redis:6379/0"
     # Redis SSL settings (для managed Redis на облачных провайдерах)
     REDIS_SSL_CERT_REQS: str = "CERT_NONE"  # CERT_NONE, CERT_OPTIONAL, CERT_REQUIRED
     REDIS_SSL_CHECK_HOSTNAME: bool = False
