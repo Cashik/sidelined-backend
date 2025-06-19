@@ -22,6 +22,7 @@ from src.config import ai_models, subscription_plans
 from src.services.x_api_service import XApiService
 from src.services.x_oauth_service import XOAuthService
 from src.config.subscription_plans import get_subscription_plan
+from src.services.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -226,8 +227,7 @@ async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number o
 
 # --- X (Twitter) OAuth ---
 
-# Временное хранилище state -> user_id (для продакшена лучше Redis с TTL)
-OAUTH_STATE_STORAGE = {}
+# OAUTH_STATE_STORAGE = {}  # Удаляем in-memory storage
 
 @router.get("/x/connect-url")
 async def get_x_connect_url(user: models.User = Depends(get_current_user)):
@@ -235,7 +235,7 @@ async def get_x_connect_url(user: models.User = Depends(get_current_user)):
     Получить ссылку для подключения X (Twitter) аккаунта через OAuth (с state)
     """
     state = str(uuid4())
-    OAUTH_STATE_STORAGE[state] = user.id  # В реале лучше хранить с TTL
+    await redis_client.setex(f"oauth_state:{state}", 600, user.id)  # 10 минут TTL
     oauth = XOAuthService()
     url = oauth.get_authorize_url(state)
     return {"url": url}
@@ -246,10 +246,11 @@ async def x_oauth_callback(code: str, state: str, db: Session = Depends(get_sess
     Callback for OAuth X (Twitter). Saves the user's X login to the User model by state.
     On success, redirects to frontend URL from settings.TWITTER_SUCCESS_REDIRECT_URI.
     """
-    user_id = OAUTH_STATE_STORAGE.pop(state, None)
+    user_id = await redis_client.get(f"oauth_state:{state}")
+    await redis_client.delete(f"oauth_state:{state}")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid or expired state")
-    user = db.get(models.User, user_id)  # FIX: db.get is sync
+    user = db.get(models.User, int(user_id))  # db.get is sync
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     oauth = XOAuthService()
