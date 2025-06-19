@@ -403,6 +403,7 @@ python -m src.cli cleanup-old-posts
 python -m src.cli create-admin --login "LOGIN" --password "PASSWORD" --role "ROLE"
 python -m src.cli master-update
 python -m src.cli update-users-xscore
+python -m src.cli update-leaderboard
 python -m src.cli create-auto-yaps -n "ProjectName"
 python -m src.cli create-auto-yaps
 """

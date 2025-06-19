@@ -1644,26 +1644,27 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     logger.info(f"[Leaderboard] Total mindshare: {total_mindshare:.4f}, total base_score: {total_base_score:.2f}, total score: {total_score:.2f}")
 
     # 7. Сохраняем ScorePayout и ProjectLeaderboardHistory
-    
-    history = models.ProjectLeaderboardHistory(
-        project_id=project.id,
-        start_ts=period_start,
-        end_ts=period_end,
-        created_at=period_end,
-    )
-    db.add(history)
-    db.commit()
-    db.refresh(history)
-    payouts = []
-    for user in user_stats.values():
-        user.payout.project_leaderboard_history_id = history.id
-        user.payout.created_at = period_end
-        db.add(user.payout)
-        payouts.append(user.payout)
-    db.commit()
-    
-    logger.info(f"[Leaderboard] Leaderboard updated for project {project.id}: {len(user_stats.values())} payouts, period {period_start} - {period_end}")
-    logger.info(f"[Leaderboard] Posts processed: {len(posts)}, stats processed: {total_stats_processed}, posts with engagement: {posts_with_engagement}, users: {len(user_stats)}")
+    try:
+        history = models.ProjectLeaderboardHistory(
+            project_id=project.id,
+            start_ts=period_start,
+            end_ts=period_end,
+            created_at=period_end,
+        )
+        db.add(history)
+        db.flush()  # чтобы получить history.id
+
+        for user in user_stats.values():
+            user.payout.project_leaderboard_history_id = history.id
+            user.payout.created_at = period_end
+            db.add(user.payout)
+        db.commit()
+        logger.info(f"[Leaderboard] Leaderboard updated for project {project.id}: ...")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[Leaderboard] Error saving payouts/history for project {project.id}: {e}\n{traceback.format_exc()}")
+        return
+
 
 
 async def cleanup_old_posts(db: Session):
