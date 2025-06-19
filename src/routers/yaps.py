@@ -421,10 +421,15 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
         new_author_bonus=new_author_bonus
     )
     
-class CoinMarketCapResponse(BaseModel):
-    price: float
-    market_cap: float
-    volume: float
-    change_24h: float
-    change_7d: float
+@router.post("/og-bonus")
+async def activate_og_bonus(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Активация бонуса за ОГ
+    """
+    if user.og_bonus_activated:
+        return {"success": True, "message": "already_activated"}
+    
+    user.og_bonus_activated = True
+    db.commit()
+    return {"success": True, "message": "activated"}
 

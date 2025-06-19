@@ -26,6 +26,7 @@ class User(Base):
     
     twitter_login = Column(String, nullable=True, server_default=None, unique=True)
     
+    og_bonus_activated = Column(Boolean, nullable=False, default=False, server_default="false")
     
     # сколько кредитов пользователь использовал сегодня
     used_credits_today = Column(Integer, nullable=False, default=0)

@@ -73,7 +73,7 @@ class User(BaseModel):
     chat_settings: UserChatSettings
     connected_wallets: List[WalletAddress]
     x_login: Optional[str] = None
-
+    og_bonus_activated: bool = False
 
 # бизнес-схемы токенов
 
