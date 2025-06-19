@@ -801,6 +801,7 @@ async def get_brain_settings(user: models.User, session: Session) -> schemas.Per
             # Возвращаем настройки по умолчанию при ошибке валидации
             return schemas.PersonalizationSettings(
                 user_social_login="",
+                user_context="",
                 style=schemas.StyleSettings(),
                 content=schemas.ContentSettings()
             )
@@ -808,6 +809,7 @@ async def get_brain_settings(user: models.User, session: Session) -> schemas.Per
         # Возвращаем настройки по умолчанию, если их нет в базе
         return schemas.PersonalizationSettings(
             user_social_login="",
+            user_context="",
             style=schemas.StyleSettings(),
             content=schemas.ContentSettings()
         )

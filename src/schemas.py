@@ -446,6 +446,7 @@ class ContentSettingsSafe(ContentSettings):
 
 class PersonalizationSettings(BaseModel):
     user_social_login: Optional[str] = None
+    user_context: Optional[str] = ""
     style: StyleSettings = Field(default_factory=StyleSettings)
     content: ContentSettings = Field(default_factory=ContentSettings)
 
@@ -464,6 +465,15 @@ class PersonalizationSettingsSafe(PersonalizationSettings):
         if v == "":
             logger.warning(f"Invalid user_social_login: {v}")
             return None
+        return v
+    
+    @field_validator("user_context", mode="before")
+    def validate_user_context(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            logger.warning(f"Invalid user_context: {v}")
+            return ""
         return v
     
     # Простые валидаторы, делегирующие работу вложенным классам

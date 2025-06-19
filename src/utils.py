@@ -1215,13 +1215,27 @@ async def generate_personalized_tweets(
         elif personalization_settings.content.hashtags == enums.HashtagPolicy.FORBIDDEN:
             content_instructions.append("Do not use hashtags")
     
+    # User context section
+    user_context_section = ""
+    if personalization_settings.user_context:
+        user_context_section = f"""
+# User's personal context
+{personalization_settings.user_context}
+# End of user's context
+Consider this context when personalizing the tweet, but DO NOT directly include or reference this information in the generated tweets.
+"""
+    
     # 2. Form the prompt
     SYSTEM_PROMPT = f"""
 You are an expert in social media content personalization. 
 Rewrite the original tweet to create {count} DIFFERENT variants, 
 each preserving the main idea but adapted to the specified style and content preferences.
+
+{user_context_section}
+
 Style requirements: {'; '.join(style_instructions) if style_instructions else 'no specific requirements'}
 Content requirements: {'; '.join(content_instructions) if content_instructions else 'no specific requirements'}
+
 Important rules for you:
 1. Rewrite the tweet — do not reply to it.
 2. Follow the supplied style guidelines exactly for every version.
