@@ -327,6 +327,7 @@ class SocialAccountAdmin(BaseProtectedView):
         StringField("social_id", label="Social ID", read_only=True, help_text="Unique account ID in social network (auto-generated)"),
         StringField("social_login", label="Social Login", required=True, help_text="Public login/username"),
         StringField("name", label="Display Name", required=False, help_text="Display name of the user"),
+        BooleanField("is_disabled_for_leaderboard", label="Disable for Leaderboard", help_text="Enable this option to exclude the account from leaderboard and hide it from users."),
         HasMany("projects", label="Related Projects", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
     ]

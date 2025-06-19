@@ -22,6 +22,7 @@ from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
 from src.services import x_api_service
 from src.config.mcp_servers import mcp_servers as mcp_servers_list
+from src.config import leaderboard
 from src.utils_base import now_timestamp, parse_date_to_timestamp
 import inspect
 from collections import defaultdict
@@ -1307,7 +1308,7 @@ def extract_profile_info_from_post(post) -> tuple[Optional[str], Optional[int]]:
     except Exception:
         return None, None
 
-def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], from_ts) -> list[schemas.LeaderboardUser]:
+def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], from_ts, db: Session) -> list[schemas.LeaderboardUser]:
     """
     Формирует список LeaderboardUser по истории лидерборда проекта.
     - mindshare: среднее арифметическое по всем историям (если нет выплаты — 0)
@@ -1329,6 +1330,9 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], f
         period_seconds = history.end_ts - max(history.start_ts, from_ts)
         for payout in history.scores:
             acc = payout.social_account
+            # пропускаем аккаунты, которые в черном списке по лидерборду
+            if is_leaderboard_blacklisted(acc, db):
+                continue
             # создаем аккаунт, если его нет
             if acc.id not in accounts:
                 accounts[acc.id] = schemas.LeaderboardUser(
@@ -1345,6 +1349,7 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], f
             # собираем посты
             posts_by_account[acc.id].extend(acc.posts)
     
+    
     logger.info(f"Sum of mindshare: {sum(acc.mindshare for acc in accounts.values())}")
     # Сортируем по scores убыванию
     result = list(accounts.values())
@@ -1360,6 +1365,26 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], f
         acc.followers = followers_count
     result.sort(key=lambda u: u.scores, reverse=True)
     return result
+
+
+def is_leaderboard_blacklisted(account: models.SocialAccount, db: Session) -> bool:
+    """
+    Проверяет, является ли аккаунт черным списком для лидерборда.
+    """
+    # если флаг is_disabled_for_leaderboard = True, то аккаунт в черном списке
+    if account.is_disabled_for_leaderboard:
+        return True
+    
+    # если логин в черном списке, то аккаунт в черном списке
+    if account.social_login in leaderboard.leaderboard_logins_blacklist:
+        return True
+    
+    # если аккаунт записан как медиа какого-то из проектов
+    for project in account.projects:
+        if project.status == enums.ProjectAccountStatus.MEDIA:
+            return True
+    
+    return False
 
 
 async def update_project_leaderboard(project: models.Project, db: Session):
@@ -1405,6 +1430,10 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     total_stats_processed = 0
     posts_with_engagement = 0
     for post in posts:
+        # пропускаем посты, автор которых в черном списке по лидерборду
+        if is_leaderboard_blacklisted(post.account, db):
+            continue
+        
         # Найти свежую статистику за период (created_at >= period_start)
         stats_in_period = [s for s in post.statistic if s.created_at >= period_start]
         total_stats_processed += len(stats_in_period)
@@ -1431,6 +1460,8 @@ async def update_project_leaderboard(project: models.Project, db: Session):
             continue
         posts_with_engagement += 1
         acc_id = post.account_id
+
+        
         if acc_id not in user_stats:
             # Получаем xscore (или 50)
             # TODO: скоры желательно получать по API

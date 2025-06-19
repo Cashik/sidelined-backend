@@ -221,7 +221,7 @@ async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number o
         return LeaderboardResponse(users=[])
 
     # 3. Собираем leaderboard
-    users = utils.build_leaderboard_users(histories, from_ts)
+    users = utils.build_leaderboard_users(histories, from_ts, db)
     return LeaderboardResponse(users=users)
 
 # --- X (Twitter) OAuth ---
@@ -405,8 +405,8 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
     # отображаем мультипликаторы по последнему payout
     last_payout = payouts[-1]
     loyalty_bonus = Multiplier(value=last_payout.loyalty_points, multiplier=1.0)
-    streak_bonus = Multiplier(value=(now_ts - last_payout.weekly_streak_start_at)//(86400*7), multiplier=1.0)
-    new_author_bonus = last_payout.new_posts_count>0
+    streak_bonus = Multiplier(value=(now_ts - last_payout.weekly_streak_start_at)//(day_seconds*7), multiplier=1.0)
+    new_author_bonus = now_ts - last_payout.first_post_at < day_seconds*7
     new_author_bonus = Multiplier(value=int(new_author_bonus), multiplier=(10 if new_author_bonus else 1))
     
     return PersonalResultsResponse(

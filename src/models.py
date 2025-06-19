@@ -205,6 +205,9 @@ class SocialAccount(Base):
     twitter_scout_score = Column(Float, nullable=True)
     twitter_scout_score_updated_at = Column(Integer, nullable=True)
     
+    # флаг, чтобы не учитывать аккаунт в лидерборде
+    is_disabled_for_leaderboard = Column(Boolean, nullable=False, default=False, server_default="false")
+    
     # Relationships
     posts = relationship("SocialPost", back_populates="account")
     projects = relationship("ProjectAccountStatus", back_populates="account")
