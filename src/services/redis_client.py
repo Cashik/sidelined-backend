@@ -15,9 +15,15 @@ if is_redis_ssl:
         'CERT_REQUIRED': ssl.CERT_REQUIRED,
     }
     cert_reqs = ssl_cert_reqs_map.get(settings.REDIS_SSL_CERT_REQS, ssl.CERT_NONE)
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = settings.REDIS_SSL_CHECK_HOSTNAME
-    ssl_context.verify_mode = cert_reqs
+    if cert_reqs == ssl.CERT_NONE:
+        # Для self-signed/Valkey: пустой контекст, без проверки
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+    else:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = settings.REDIS_SSL_CHECK_HOSTNAME
+        ssl_context.verify_mode = cert_reqs
     redis_kwargs["ssl"] = ssl_context
 
 redis_client = redis.from_url(settings.REDIS_URL, **redis_kwargs) 
