@@ -113,8 +113,8 @@ celery_app.conf.update(
     result_serializer='json',
     
     # Настройки времени выполнения
-    task_soft_time_limit=300,  # 5 минут мягкий лимит
-    task_time_limit=600,       # 10 минут жесткий лимит
+    task_soft_time_limit=60*50,  # 50 минут мягкий лимит
+    task_time_limit=60*55,       # 55 минут жесткий лимит
     
     # SSL настройки для Redis
     broker_transport_options=broker_transport_options,

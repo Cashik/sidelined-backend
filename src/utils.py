@@ -1365,7 +1365,6 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], f
     
     
     logger.info(f"Sum of mindshare: {sum(acc.mindshare for acc in accounts.values())}")
-    # Сортируем по scores убыванию
     result = list(accounts.values())
     # --- ДОБАВЛЯЕМ avatar_url и followers из самого свежего поста ---
     for acc_id, acc in accounts.items():
@@ -1377,7 +1376,8 @@ def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], f
             profile_url, followers_count = None, None
         acc.avatar_url = profile_url
         acc.followers = followers_count
-    result.sort(key=lambda u: u.scores, reverse=True)
+    # Сортируем по mindshare убыванию
+    result.sort(key=lambda u: u.mindshare, reverse=True)
     return result
 
 
