@@ -10,9 +10,11 @@ from typing import AsyncGenerator, Callable, Optional, Dict, List, Any, TypeVar
 import logging
 import openai
 from openai import OpenAI
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, joinedload
 from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
 import requests
+import inspect
+from collections import defaultdict
 
 from src import schemas, enums, models, exceptions, crud
 from src.config.settings import settings
@@ -20,12 +22,14 @@ from src.config.subscription_plans import subscription_plans
 from src.config.ai_models import all_ai_models as ai_models
 from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
+from src.services import cache_service
 from src.services import x_api_service
 from src.config.mcp_servers import mcp_servers as mcp_servers_list
 from src.config import leaderboard
 from src.utils_base import now_timestamp, parse_date_to_timestamp
-import inspect
-from collections import defaultdict
+
+from src.services.cache_service import LeaderboardCacheService, FeedCacheService
+from src.crud import get_top_engagement_posts
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -1699,11 +1703,29 @@ async def master_update(db: Session):
             if not (feed_updated or news_updated):
                 logger.info(f"[MasterUpdate] No updates for project {project.id}")
                 continue
-            
+            # обновляем кеш фида (всегда, если были обновления)
+            try:
+                await get_feed(project, db, force_rebuild=True)
+                logger.info(f"[MasterUpdate] Feed cache updated for project {project.id}")
+            except Exception as e:
+                logger.error(f"[MasterUpdate] Error updating feed cache for project {project.id}: {e}")
+                
             if project.is_leaderboard_project:
                 # обновляем лидерборд
-                await update_project_leaderboard(project, db)
-                logger.info(f"[MasterUpdate] Leaderboard updated for project {project.id}")
+                try:
+                    await update_project_leaderboard(project, db)
+                    logger.info(f"[MasterUpdate] Leaderboard updated for project {project.id}")
+                except Exception as e:
+                    logger.error(f"[MasterUpdate] Error updating leaderboard for project {project.id}: {e}")
+                
+                # обновляем кеш лидерборда
+                # для каждого периода
+                for period in cache_service.LeaderboardPeriod:
+                    try:
+                        await get_leaderboard(project, period, db, force_rebuild=True)
+                    except Exception as e:
+                        logger.error(f"[MasterUpdate] Error updating leaderboard cache for project {project.id}, period {period}: {e}")
+              
         except Exception as e:
             logger.error(f"[MasterUpdate] Error updating project {project.id}. Details: {e} {traceback.format_exc()}")
             
@@ -1763,6 +1785,67 @@ def get_social_account_xscore(social_account: models.SocialAccount) -> float:
     else:
         return None
     
+
+async def get_leaderboard(project: models.Project, period: cache_service.LeaderboardPeriod, db: Session, force_rebuild: bool = False) -> List[dict]:
+    """
+    Получить лидерборд проекта за указанный период с кешированием.
+    Если force_rebuild=True — всегда пересчитывает и обновляет кеш.
+    """
+    leaderboard_cache = LeaderboardCacheService()
+    if not force_rebuild:
+        cached = await leaderboard_cache.get_leaderboard(project.id, period)
+        if cached is not None:
+            return cached
+    logger.info(f"[Leaderboard] Cache miss for project {project.name}, period {period}")
+    # --- Пересчёт ---
+    # Определяем from_ts для периода
+    now_ts = now_timestamp()
+    if period == cache_service.LeaderboardPeriod.ONE_DAY:
+        from_ts = now_ts - 86400
+    elif period == cache_service.LeaderboardPeriod.THREE_DAYS:
+        from_ts = now_ts - 86400*3
+    elif period == cache_service.LeaderboardPeriod.ONE_WEEK:
+        from_ts = now_ts - 86400*7
+    elif period == cache_service.LeaderboardPeriod.ALL_TIME:
+        from_ts = 0
+    else:
+        raise ValueError(f"Unknown leaderboard period: {period}")
+    # Получаем истории
+    histories = (
+        db.query(models.ProjectLeaderboardHistory)
+        .options(joinedload(models.ProjectLeaderboardHistory.scores).joinedload(models.ScorePayout.social_account))
+        .filter(models.ProjectLeaderboardHistory.project_id == project.id)
+        .filter(models.ProjectLeaderboardHistory.created_at >= from_ts)
+        .order_by(models.ProjectLeaderboardHistory.created_at)
+        .all()
+    )
+    logger.info(f"[Leaderboard] Found {len(histories)} histories for project {project.name}, period {period}")
+    users = build_leaderboard_users(histories, from_ts, db)
+    # Сериализация (pydantic -> dict)
+    users_data = [u.model_dump() if hasattr(u, 'model_dump') else u.dict() for u in users]
+    await leaderboard_cache.set_leaderboard(project.id, period, users_data)
+    return users_data
     
-    # получаем все посты с упоминанием проекта лидерборда
+
+feed_cache = FeedCacheService()
+
+async def get_feed(project: models.Project, db: Session, force_rebuild: bool = False) -> List[schemas.Post]:
+    """
+    Получить топ-100 постов по engagement за сутки для проекта с кешированием.
+    Если force_rebuild=True — всегда пересчитывает и обновляет кеш.
+    """
+    if not force_rebuild:
+        cached = await feed_cache.get_feed(project.id)
+        if cached is not None:
+            # Десериализация
+            logger.info(f"[Feed] Cache hit for project {project.name}")
+            return [schemas.Post(**p) for p in cached]
+    logger.info(f"[Feed] Cache miss for project {project.name}")
+    # --- Пересчёт ---
+    posts = get_top_engagement_posts(project, db, limit=100, period=86400)
+    posts_schemas = convert_posts_to_schemas(posts)
+    # Сериализация
+    posts_data = [p.model_dump() if hasattr(p, 'model_dump') else p.dict() for p in posts_schemas]
+    await feed_cache.set_feed(project.id, posts_data)
+    return posts_schemas
     

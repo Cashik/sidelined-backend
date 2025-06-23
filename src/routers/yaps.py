@@ -72,25 +72,31 @@ async def select_projects(request: schemas.SelectProjectsRequest, user: models.U
 @router.get("/feed", response_model=schemas.GetFeedResponse)
 async def get_feed(
     projects_ids: Optional[List[int]] = Query(None, description="List of project IDs to filter by"),
-    include_project_sources: bool = True,
     sort_type: enums.SortType = enums.SortType.POPULAR,
     db: Session = Depends(get_session)
 ):
     """
-    Получение ленты постов, связанных с проектом (по упоминаниям), с возможностью исключения постов от связанных аккаунтов.
+    Получение ленты постов, связанных с проектом (по упоминаниям), без постов от официальных источников.
+    Теперь используется кеш топ-100 постов по engagement за сутки для каждого проекта.
     """
+    start_ts = utils_base.now_timestamp()
     if not projects_ids:
         projects = await crud.get_projects_all(db)
-        projects_ids = [p.id for p in projects]
-    posts = await crud.get_project_feed_posts(
-        db=db,
-        project_ids=projects_ids,
-        include_project_sources=include_project_sources,
-        sort_type=sort_type,
-        limit=100,
-    )
-    posts_schemas = utils.convert_posts_to_schemas(posts)
-    return schemas.GetFeedResponse(posts=posts_schemas)
+    else:
+        projects = db.query(models.Project).filter(models.Project.id.in_(projects_ids)).all()
+    all_posts = []
+    for project in projects:
+        posts = await utils.get_feed(project, db)
+        all_posts.extend(posts)
+    # Сортировка
+    all_posts.sort(key=lambda p: p.stats.favorite_count + p.stats.retweet_count*3 + p.stats.reply_count*4 + p.stats.views_count*0.001, reverse=True)
+    # обрезаем до 100 постов
+    all_posts = all_posts[:100]
+    # если необходимо, сортируем по дате
+    if sort_type == enums.SortType.NEW:
+        all_posts.sort(key=lambda p: p.created_timestamp, reverse=True)
+    logger.info(f"[Feed] Found {len(all_posts)} posts in {utils_base.now_timestamp() - start_ts} seconds")
+    return schemas.GetFeedResponse(posts=all_posts)
 
 @router.get("/news", response_model=schemas.GetFeedResponse)
 async def get_news(
@@ -207,27 +213,22 @@ async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number o
     if not project:
         return LeaderboardResponse(users=[])
 
-    # 2. Получаем истории за период
-    now_ts = int(time.time())
-    from_ts = now_ts - days * 86400
-    histories = (
-        db.query(models.ProjectLeaderboardHistory)
-        .options(joinedload(models.ProjectLeaderboardHistory.scores).joinedload(models.ScorePayout.social_account))
-        .filter(models.ProjectLeaderboardHistory.project_id == project.id)
-        .filter(models.ProjectLeaderboardHistory.created_at >= from_ts)
-        .order_by(models.ProjectLeaderboardHistory.created_at)
-        .all()
-    )
-    if not histories:
-        return LeaderboardResponse(users=[])
 
+    from src.services import cache_service
+    if days == 1:
+        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ONE_DAY, db)
+    elif days == 3:
+        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.THREE_DAYS, db)
+    elif days == 7:
+        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ONE_WEEK, db)
+    else:
+        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ALL_TIME, db)
+        
+    logger.info(f"[Leaderboard] Found {len(users)} users for project {project.name}, period {days} days")
     # 3. Собираем leaderboard
-    users = utils.build_leaderboard_users(histories, from_ts, db)
     return LeaderboardResponse(users=users)
 
 # --- X (Twitter) OAuth ---
-
-# OAUTH_STATE_STORAGE = {}  # Удаляем in-memory storage
 
 @router.get("/x/connect-url")
 async def get_x_connect_url(user: models.User = Depends(get_current_user)):

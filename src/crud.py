@@ -1061,3 +1061,48 @@ async def get_last_payout_by_social_account_id(db: Session, social_account_id: i
     ).order_by(desc(models.ScorePayout.created_at)).first()
     
     
+def get_top_engagement_posts(project: models.Project, db: Session, limit: int = 100, period: int = 86400):
+    """
+    Возвращает топ-N постов по engagement за последние period секунд для проекта.
+    Исключает посты от официальных источников (OFFICIAL).
+    Сортировка по engagement (views*0.001 + likes*1 + reposts*3 + comments*4) по самой свежей статистике.
+    """
+    now_ts = int(time.time())
+    from_ts = now_ts - period
+    # Получаем только посты этого проекта, созданные за период, и не от официальных источников
+    posts = (
+        db.query(models.SocialPost)
+        .join(models.ProjectMention, models.ProjectMention.post_id == models.SocialPost.id)
+        .join(models.SocialAccount, models.SocialPost.account_id == models.SocialAccount.id)
+        .outerjoin(
+            models.ProjectAccountStatus,
+            (models.ProjectAccountStatus.account_id == models.SocialAccount.id) &
+            (models.ProjectAccountStatus.project_id == project.id)
+        )
+        .filter(models.ProjectMention.project_id == project.id)
+        .filter(models.SocialPost.posted_at >= from_ts)
+        .filter(models.ProjectAccountStatus.id == None)
+        .options(joinedload(models.SocialPost.statistic))
+        .all()
+    )
+    # Для каждого поста берём самую свежую статистику
+    def get_latest_stat(post):
+        if not post.statistic:
+            return None
+        return max(post.statistic, key=lambda s: s.created_at)
+    # Считаем engagement
+    def calc_engagement(stat):
+        if not stat:
+            return 0
+        return stat.views*0.001 + stat.likes*1 + stat.reposts*3 + stat.comments*4
+    posts_with_stats = [
+        (post, calc_engagement(get_latest_stat(post)))
+        for post in posts
+    ]
+    # Сортируем по engagement
+    posts_with_stats.sort(key=lambda x: x[1], reverse=True)
+    # Берём топ-N
+    top_posts = [p[0] for p in posts_with_stats[:limit]]
+    return top_posts
+    
+    
