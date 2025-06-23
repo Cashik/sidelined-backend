@@ -1418,8 +1418,11 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         new_posts_count: int
         payout: models.ScorePayout
 
+    HOUR_PERIOD = 60*60
+    NOW_TS = now_timestamp()
 
-    # 1. Получаем дату последнего leaderboard_history (или сутки назад)
+
+    # 1. Получаем дату последнего leaderboard_history (или константное время назад)
     last_history = (
         db.query(models.ProjectLeaderboardHistory)
         .filter(models.ProjectLeaderboardHistory.project_id == project.id)
@@ -1430,24 +1433,29 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         period_start = last_history.end_ts+1
         logger.info(f"[Leaderboard] Last history found: {period_start}")
     else:
-        period_start = now_timestamp() - 60*60*4 # 4 hours
+        period_start = now_timestamp() - HOUR_PERIOD*4 # 4 hours
         logger.info(f"[Leaderboard] No history found, using last 4h: {period_start}")
-    period_end = now_timestamp()
+        
+    period_end = NOW_TS
+    # Ограничиваем период, чтобы не обрабатывать сразу слишком много постов
+    if period_end - period_start > HOUR_PERIOD*24:
+        period_end = period_start + HOUR_PERIOD*24
+        logger.info(f"[Leaderboard] Period is too long, limiting to 24 hours: {period_end}")
+        
+        
+    logger.info(f"[Leaderboard] Period: {period_start} - {period_end}")
     period_seconds = period_end - period_start
 
-    # 2. Получаем ВСЕ посты с упоминанием проекта, у которых есть статистика за период
+    # 2. Получаем посты с упоминанием проекта, у которых есть статистика за период
     # TODO: тут не совпадает описание тк мы по факту берем именно посты которые были созданы за период, а не обновлены
-    posts: list[models.SocialPost] = await crud.get_project_feed(project, settings.POST_SYNC_PERIOD_SECONDS, db)
-    logger.info(f"[Leaderboard] Posts fetched: {len(posts)}")
-    if not posts:
-        logger.info(f"[Leaderboard] No posts for leaderboard update for project {project.id}")
-        return
+    posts_generator = crud.get_updated_posts(db, project, period_start, period_end, batch_size=500)
+    logger.info(f"[Leaderboard] Posts fetched")
 
     # 3. Для каждого поста ищем старую и новую статистику, считаем engagement
     user_stats: dict[int, ProjectLeaderboardUser] = {}
     total_stats_processed = 0
     posts_with_engagement = 0
-    for post in posts:
+    for post in posts_generator:
         # пропускаем посты, автор которых в черном списке по лидерборду
         if is_leaderboard_blacklisted(post.account, db):
             continue
@@ -1538,33 +1546,33 @@ async def update_project_leaderboard(project: models.Project, db: Session):
             if not last_payout:
                 # если еще небыло выплат по этому проекту для юзера, значит это первый пост
                 # TODO: не уверен, что нужно устанавливать именно это время
-                user.payout.first_post_at = now_timestamp()
-                user.payout.last_post_at = now_timestamp()
-                user.payout.weekly_streak_start_at = now_timestamp()
+                user.payout.first_post_at = NOW_TS
+                user.payout.last_post_at = NOW_TS
+                user.payout.weekly_streak_start_at = NOW_TS
                 user.payout.loyalty_points = 0
                 user.payout.min_loyalty = 0
             else:
                 # сохраняем прошлые значения
-                user.payout.first_post_at = last_payout.first_post_at if last_payout.first_post_at is not None else now_timestamp()
-                user.payout.last_post_at = last_payout.last_post_at if last_payout.last_post_at is not None else now_timestamp()
-                user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at if last_payout.weekly_streak_start_at is not None else now_timestamp()
+                user.payout.first_post_at = last_payout.first_post_at if last_payout.first_post_at is not None else NOW_TS
+                user.payout.last_post_at = last_payout.last_post_at if last_payout.last_post_at is not None else NOW_TS
+                user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at if last_payout.weekly_streak_start_at is not None else NOW_TS
                 user.payout.loyalty_points = last_payout.loyalty_points if last_payout.loyalty_points is not None else 0
                 user.payout.min_loyalty = last_payout.min_loyalty if last_payout.min_loyalty is not None else 0
         
             ### рассчитываем бонусы
             ## бонус за первую неделю
             # рассчитываем бонус за первую неделю
-            week_period = now_timestamp() - 60*60*24*7
+            week_period = NOW_TS - 60*60*24*7
             if user.payout.first_post_at >= week_period:
                 score += base_score*9
 
             ## бонус за стрик
             # сбрасываем стрик, если не было упоминания об проекте за неделю
             if user.payout.last_post_at < week_period:
-                user.payout.weekly_streak_start_at = now_timestamp()   
+                user.payout.weekly_streak_start_at = NOW_TS   
             else:
                 # считаем длину стрика
-                weeks_since_streak_start = (now_timestamp() - user.payout.weekly_streak_start_at) // week_period
+                weeks_since_streak_start = (NOW_TS - user.payout.weekly_streak_start_at) // week_period
                 weeks_to_multiplier = {
                     0: 0,
                     1: 0.25,
@@ -1577,7 +1585,7 @@ async def update_project_leaderboard(project: models.Project, db: Session):
             # снимаем очки лояльности за каждую целую неделю некативности.
             week_penalty = 0.1
             penalty_multiplier = 1-week_penalty
-            weeks_since_last_post = (now_timestamp() - user.payout.last_post_at) // week_period
+            weeks_since_last_post = (NOW_TS - user.payout.last_post_at) // week_period
             user.payout.loyalty_points = max(
                 user.payout.min_loyalty, 
                 user.payout.loyalty_points*(penalty_multiplier**weeks_since_last_post)
@@ -1635,7 +1643,7 @@ async def update_project_leaderboard(project: models.Project, db: Session):
 
             # обновляем дату последнего поста, если были новые посты за этот период
             if user.payout.new_posts_count > 0:
-                user.payout.last_post_at = now_timestamp()
+                user.payout.last_post_at = NOW_TS
                 
             logger.info(f"[Leaderboard] User {app_user.id} score: {score:.2f}, mindshare: {user.payout.mindshare:.4f}, base_score: {user.payout.base_score:.2f}, engagement: {user.payout.engagement:.2f}, new_posts_count: {user.payout.new_posts_count}, first_post_at: {user.payout.first_post_at}, last_post_at: {user.payout.last_post_at}, weekly_streak_start_at: {user.payout.weekly_streak_start_at}, loyalty_points: {user.payout.loyalty_points}, min_loyalty: {user.payout.min_loyalty}")
 

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple, Dict
+from typing import AsyncGenerator, Generator, List, Optional, Tuple, Dict
 from sqlalchemy import select, delete, and_, or_, func, desc, update, literal
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, defer, selectinload
 
 from src import models, schemas, enums, exceptions, utils_base
 from src.config.settings import settings
@@ -1105,4 +1105,38 @@ def get_top_engagement_posts(project: models.Project, db: Session, limit: int = 
     top_posts = [p[0] for p in posts_with_stats[:limit]]
     return top_posts
     
+
+def get_updated_posts(
+    db: Session, 
+    project: models.Project, 
+    period_start: int, 
+    period_end: int, 
+    batch_size: int = 100,
+):
+    """
+    Получение постов, связанных с проектом, статистика которых обновлена за период.
+
+    К посту прилогается аккаунт, и последняя статистика по нему.
+    """
+    
+    posts = (
+        db.query(models.SocialPost)
+        .options(
+            defer(models.SocialPost.raw_data),
+            selectinload(models.SocialPost.account),
+            selectinload(models.SocialPost.statistic),
+        )
+        .join(models.ProjectMention, models.ProjectMention.post_id == models.SocialPost.id)
+        .join(models.SocialPostStatistic, models.SocialPostStatistic.post_id == models.SocialPost.id)
+        .filter(
+            models.ProjectMention.project_id == project.id,
+            models.SocialPostStatistic.created_at >= period_start,
+            models.SocialPostStatistic.created_at <= period_end
+        )
+        .distinct()
+        .yield_per(batch_size)
+    )
+    
+    for post in posts:
+        yield post
     
