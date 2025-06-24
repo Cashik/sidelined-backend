@@ -42,7 +42,7 @@ async def _create_autoyaps_async():
 @celery_app.task(
     bind=True,
     name="src.tasks.create_autoyaps.create_autoyaps",
-    max_retries=3,
+    max_retries=0,
     default_retry_delay=300,  # 5 минут между повторами
 )
 def create_autoyaps(self):  # type: ignore[override]
