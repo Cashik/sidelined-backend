@@ -1342,64 +1342,6 @@ def extract_profile_info_from_post(post) -> tuple[Optional[str], Optional[int]]:
     except Exception:
         return None, None
 
-def build_leaderboard_users(histories: list[models.ProjectLeaderboardHistory], from_ts, db: Session) -> list[schemas.LeaderboardUser]:
-    """
-    Формирует список LeaderboardUser по истории лидерборда проекта.
-    - mindshare: среднее арифметическое по всем историям (если нет выплаты — 0)
-    - scores: сумма всех выплат
-    - avatar_url, followers: из самого свежего поста (если есть)
-    - name, login: из SocialAccount
-    """
-    if not histories:
-        return []
-    
-    total_period_seconds = 0
-    for history in histories:
-        total_period_seconds += history.end_ts - max(history.start_ts, from_ts)
-
-    # Собираем все уникальные аккаунты
-    accounts = {}
-    posts_by_account = defaultdict(list)
-    for history in histories:
-        period_seconds = history.end_ts - max(history.start_ts, from_ts)
-        for payout in history.scores:
-            acc = payout.social_account
-            # пропускаем аккаунты, которые в черном списке по лидерборду
-            if is_leaderboard_blacklisted(acc, db):
-                continue
-            # создаем аккаунт, если его нет
-            if acc.id not in accounts:
-                accounts[acc.id] = schemas.LeaderboardUser(
-                    avatar_url=None,
-                    name=acc.name or acc.social_login or f"id{acc.id}",
-                    login=acc.social_login or f"id{acc.id}",
-                    followers=None,
-                    mindshare=0.0,
-                    scores=0.0
-                )
-            # суммируем mindshare и scores
-            accounts[acc.id].mindshare += (payout.mindshare*period_seconds)/total_period_seconds
-            accounts[acc.id].scores += payout.score
-            # собираем посты
-            posts_by_account[acc.id].extend(acc.posts)
-    
-    
-    logger.info(f"Sum of mindshare: {sum(acc.mindshare for acc in accounts.values())}")
-    result = list(accounts.values())
-    # --- ДОБАВЛЯЕМ avatar_url и followers из самого свежего поста ---
-    for acc_id, acc in accounts.items():
-        user_posts = posts_by_account.get(acc_id, [])
-        if user_posts:
-            latest_post = max(user_posts, key=lambda p: p.posted_at)
-            profile_url, followers_count = extract_profile_info_from_post(latest_post)
-        else:
-            profile_url, followers_count = None, None
-        acc.avatar_url = profile_url
-        acc.followers = followers_count
-    # Сортируем по mindshare убыванию
-    result.sort(key=lambda u: u.mindshare, reverse=True)
-    return result
-
 
 def is_leaderboard_blacklisted(account: models.SocialAccount, db: Session) -> bool:
     """

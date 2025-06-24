@@ -212,9 +212,9 @@ TweetResults.model_rebuild()
 class XApiService:
     
     API_HOST = "twitter-api-v1-1-enterprise.p.rapidapi.com"
-    RETRAY_COUNT = 3
+    RETRAY_COUNT = 5
     RETRAY_DELAY = 5
-    BASE_REQUEST_DELAY = 1
+    BASE_REQUEST_DELAY = 0.1
     
     def __init__(self):
         self.api_key = settings.X_RAPIDAPI_KEY
