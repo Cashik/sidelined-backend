@@ -1803,8 +1803,8 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
                     all_time_users[payout.social_account_id].followers = social_account.last_followers_count
                     # TODO: это не лучший способ, но пока так. В идеале, нужно удостовериться, что есть пользователь с таким подключенным аккаунтом
                     all_time_users[payout.social_account_id].is_connected = social_account.twitter_scout_score_updated_at is not None
-            all_time_users[payout.social_account_id].score += payout.score
-            all_time_users[payout.social_account_id].posts += payout.new_posts_count
+            all_time_users[payout.social_account_id].score += payout.score if payout.score is not None else 0
+            all_time_users[payout.social_account_id].posts += payout.new_posts_count if payout.new_posts_count is not None else 0
     
     # TODO: для каждого пользователя получаем присутствие в проекте
     # окончание периода - это максимальный end_ts среди всех периодов
@@ -1864,10 +1864,10 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
                         posts_all_time=user_all_time_data.posts,
                         is_connected=user_all_time_data.is_connected,
                     )
-                leaderboard_users[payout.social_account_id].scores += payout.score
-                leaderboard_users[payout.social_account_id].posts_period += payout.new_posts_count
-                leaderboard_users[payout.social_account_id].engagement += payout.engagement
-                leaderboard_users[payout.social_account_id].mindshare += payout.mindshare*(history_period_seconds/all_period_seconds)
+                leaderboard_users[payout.social_account_id].scores += payout.score if payout.score is not None else 0
+                leaderboard_users[payout.social_account_id].posts_period += payout.new_posts_count if payout.new_posts_count is not None else 0
+                leaderboard_users[payout.social_account_id].engagement += payout.engagement if payout.engagement is not None else 0
+                leaderboard_users[payout.social_account_id].mindshare += payout.mindshare*(history_period_seconds/all_period_seconds) if payout.mindshare is not None else 0
 
         #TODO: чисто для отладки отображаем статистику по подсчету
         leaderboard_users = list(leaderboard_users.values())
