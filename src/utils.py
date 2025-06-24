@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 import functools
 import random
@@ -585,28 +586,43 @@ async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db
             return
 
         source_id = post.core.user_results.result.rest_id
-        source_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
-        if not source_db:
-            # создаем источник
-            source_data: XApiService.User = post.core.user_results.result
+        social_account_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
+        source_data: XApiService.User = post.core.user_results.result
+        
+        if not social_account_db:
+            # создаем источник (аккаунт в твиттере)
             if not hasattr(source_data, 'legacy'):
                 logger.warning(f"Skipping tweet due to missing source legacy data: {source_data}")
                 return
-
-            source_db = models.SocialAccount(
+            social_account_db = models.SocialAccount(
                 social_id=source_id,
                 name=source_data.legacy.name,
                 social_login=source_data.legacy.screen_name,
+                last_avatar_url=source_data.legacy.profile_image_url_https,
+                last_followers_count=source_data.legacy.followers_count
             )
-            source_db = await crud.create_social_account(source_db, db)
-
+            social_account_db = await crud.create_or_update_social_account(social_account_db, db)
+        else:
+            # TODO: возможно, стоит обновлять реже каждый раз для нового поста
+            # обновляем только если аватарка изменилась
+            need_update = False
+            if source_data.legacy.profile_image_url_https is not None and social_account_db.last_avatar_url != source_data.legacy.profile_image_url_https:
+                social_account_db.last_avatar_url = source_data.legacy.profile_image_url_https
+                need_update = True
+            if source_data.legacy.followers_count is not None and social_account_db.last_followers_count != source_data.legacy.followers_count:
+                social_account_db.last_followers_count = source_data.legacy.followers_count
+                need_update = True
+            if need_update:
+                social_account_db = await crud.create_or_update_social_account(social_account_db, db)
+        
+        
         # Преобразуем строку даты в timestamp
         posted_at_timestamp = parse_date_to_timestamp(main_post_data.created_at)
         
         # создаем пост
         post_db = models.SocialPost(
             social_id=post_id,
-            account_id=source_db.id,
+            account_id=social_account_db.id,
             text=main_post_data.full_text,
             posted_at=posted_at_timestamp,
             raw_data=post.model_dump(mode="json")
@@ -1678,7 +1694,6 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         return
 
 
-
 async def cleanup_old_posts(db: Session):
     """
     Очищает старые посты после обновлений, чтобы не засорять базу.
@@ -1727,12 +1742,11 @@ async def master_update(db: Session):
                     logger.error(f"[MasterUpdate] Error updating leaderboard for project {project.id}: {e}")
                 
                 # обновляем кеш лидерборда
-                # для каждого периода
-                for period in cache_service.LeaderboardPeriod:
-                    try:
-                        await get_leaderboard(project, period, db, force_rebuild=True)
-                    except Exception as e:
-                        logger.error(f"[MasterUpdate] Error updating leaderboard cache for project {project.id}, period {period}: {e}")
+                # для любого из периодов (обновляет все кеши)
+                try:
+                    await get_leaderboard(project, cache_service.LeaderboardPeriod.ALL_TIME, db, force_rebuild=True)
+                except Exception as e:
+                    logger.error(f"[MasterUpdate] Error updating leaderboard cache for project {project.id}: {e}")
               
         except Exception as e:
             logger.error(f"[MasterUpdate] Error updating project {project.id}. Details: {e} {traceback.format_exc()}")
@@ -1799,41 +1813,139 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
     Получить лидерборд проекта за указанный период с кешированием.
     Если force_rebuild=True — всегда пересчитывает и обновляет кеш.
     """
+    
     leaderboard_cache = LeaderboardCacheService()
     if not force_rebuild:
         cached = await leaderboard_cache.get_leaderboard(project.id, period)
         if cached is not None:
+            logger.info(f"[Leaderboard] Cache hit for project {project.name}, period {period}")
             return cached
     logger.info(f"[Leaderboard] Cache miss for project {project.name}, period {period}")
+    
+    
     # --- Пересчёт ---
     # Определяем from_ts для периода
     now_ts = now_timestamp()
-    if period == cache_service.LeaderboardPeriod.ONE_DAY:
-        from_ts = now_ts - 86400
-    elif period == cache_service.LeaderboardPeriod.THREE_DAYS:
-        from_ts = now_ts - 86400*3
-    elif period == cache_service.LeaderboardPeriod.ONE_WEEK:
-        from_ts = now_ts - 86400*7
-    elif period == cache_service.LeaderboardPeriod.ALL_TIME:
-        from_ts = 0
-    else:
-        raise ValueError(f"Unknown leaderboard period: {period}")
-    # Получаем истории
+    # Получаем всю историю
     histories = (
         db.query(models.ProjectLeaderboardHistory)
         .options(joinedload(models.ProjectLeaderboardHistory.scores).joinedload(models.ScorePayout.social_account))
         .filter(models.ProjectLeaderboardHistory.project_id == project.id)
-        .filter(models.ProjectLeaderboardHistory.created_at >= from_ts)
         .order_by(models.ProjectLeaderboardHistory.created_at)
         .all()
     )
-    logger.info(f"[Leaderboard] Found {len(histories)} histories for project {project.name}, period {period}")
-    users = build_leaderboard_users(histories, from_ts, db)
-    # Сериализация (pydantic -> dict)
-    users_data = [u.model_dump() if hasattr(u, 'model_dump') else u.dict() for u in users]
-    await leaderboard_cache.set_leaderboard(project.id, period, users_data)
-    return users_data
     
+    # для начала, считаем общие данные за все время для каждого пользователя
+    class AllTimeUserHistory:
+        score: float = 0
+        posts: int = 0
+        avatar_url: Optional[str] = None
+        followers: Optional[int] = None
+        is_connected: bool = False
+        name: Optional[str] = None
+        login: Optional[str] = None
+    
+    
+    all_time_users: dict[int, AllTimeUserHistory] = {}
+    # считаем общие данные за все время для каждого пользователя
+    for history in histories:
+        for payout in history.scores:
+            if payout.social_account_id not in all_time_users:
+                all_time_users[payout.social_account_id] = AllTimeUserHistory()
+                
+                social_account = payout.social_account
+                if social_account is not None:
+                    all_time_users[payout.social_account_id].name = social_account.name or social_account.social_login
+                    all_time_users[payout.social_account_id].login = social_account.social_login
+                    all_time_users[payout.social_account_id].avatar_url = social_account.last_avatar_url
+                    all_time_users[payout.social_account_id].followers = social_account.last_followers_count
+                    # TODO: это не лучший способ, но пока так. В идеале, нужно удостовериться, что есть пользователь с таким подключенным аккаунтом
+                    all_time_users[payout.social_account_id].is_connected = social_account.twitter_scout_score_updated_at is not None
+            all_time_users[payout.social_account_id].score += payout.score
+            all_time_users[payout.social_account_id].posts += payout.new_posts_count
+    
+    # TODO: для каждого пользователя получаем присутствие в проекте
+    # окончание периода - это максимальный end_ts среди всех периодов
+    end_ts = max(history.end_ts for history in histories)
+    first_ts = min(history.start_ts for history in histories)
+    
+    ONE_DAY = 86400
+    
+    # для каждого периода считаем данные
+    for cached_preriod in cache_service.LeaderboardPeriod:
+        if cached_preriod == cache_service.LeaderboardPeriod.ALL_TIME:
+            start_ts = first_ts
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_DAY:
+            start_ts = end_ts - ONE_DAY
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_WEEK:
+            start_ts = end_ts - ONE_DAY*7
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_MONTH:
+            start_ts = end_ts - ONE_DAY*30
+        else:
+            raise ValueError(f"Unknown leaderboard period: {cached_preriod}")
+        start_ts = max(start_ts, first_ts)
+        # для подсчета взвешенного mindshare
+        all_period_seconds = end_ts - start_ts
+        def timespan_to_str(ts: int) -> str:
+            return f"{datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}"
+        logger.info(f"[Leaderboard] Подсчет для периода {cached_preriod}: {timespan_to_str(start_ts)} - {timespan_to_str(end_ts)}, {all_period_seconds/(60*60)} часов")
+        
+        # место для хранения данных за период
+        leaderboard_users: dict[int, schemas.LeaderboardUser] = {}
+        # проходим по истории
+        for history in histories:
+            # пропускаем истории, которые не входят в период
+            if history.created_at < start_ts:
+                continue
+            # время, которое охватывает эта история
+            # TODO: первый период обычно нужно считать не полным и обрезать его period и полученные за этот период скоры, майндшер и тд
+            history_period_seconds = history.end_ts - max(history.start_ts, start_ts)
+            # TODO: считать mindshare_delta
+            for payout in history.scores:
+                if payout.social_account_id not in leaderboard_users:
+                    user_all_time_data = all_time_users.get(payout.social_account_id, None)
+                    if user_all_time_data is None:
+                        # такого не должно быть, но если что, то пропускаем
+                        logger.error(f"[Leaderboard] No all time data for social account {payout.social_account_id}")
+                        continue
+                    leaderboard_users[payout.social_account_id] = schemas.LeaderboardUser(
+                        avatar_url=user_all_time_data.avatar_url,
+                        name=user_all_time_data.name or "",
+                        login=user_all_time_data.login or "",
+                        followers=user_all_time_data.followers,
+                        mindshare=0,
+                        mindshare_delta=0,
+                        engagement=0,
+                        scores=0,
+                        scores_all_time=user_all_time_data.score,
+                        posts_period=0,
+                        posts_all_time=user_all_time_data.posts,
+                        is_connected=user_all_time_data.is_connected,
+                    )
+                leaderboard_users[payout.social_account_id].scores += payout.score
+                leaderboard_users[payout.social_account_id].posts_period += payout.new_posts_count
+                leaderboard_users[payout.social_account_id].engagement += payout.engagement
+                leaderboard_users[payout.social_account_id].mindshare += payout.mindshare*(history_period_seconds/all_period_seconds)
+
+        #TODO: чисто для отладки отображаем статистику по подсчету
+        leaderboard_users = list(leaderboard_users.values())
+        leaderboard_users.sort(key=lambda x: x.mindshare, reverse=True)
+        #for user in leaderboard_users:
+        #    logger.info(f"[Leaderboard] User {user.login}: mindshare={user.mindshare}, scores={user.scores}, posts_period={user.posts_period}, engagement={user.engagement}")
+        # Сериализация (pydantic -> dict)
+        users_data = [u.model_dump() for u in leaderboard_users]
+        await leaderboard_cache.set_leaderboard(project.id, cached_preriod, users_data)
+        logger.info(f"[Leaderboard] Cache set for project {project.name}, period {cached_preriod} with {len(users_data)} users")
+    
+    # после пересчета снова пытаемся получить кеш
+    cached = await leaderboard_cache.get_leaderboard(project.id, period)
+    if cached is not None:
+        return cached
+    logger.error(f"[Leaderboard] Error updating leaderboard cache for project {project.id}, period {period}")
+    # если кеш не получился, то возвращаем пустой список
+    return []
+    
+
 
 feed_cache = FeedCacheService()
 

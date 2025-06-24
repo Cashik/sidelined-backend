@@ -23,6 +23,7 @@ from src.services.x_api_service import XApiService
 from src.services.x_oauth_service import XOAuthService
 from src.config.subscription_plans import get_subscription_plan
 from src.services.redis_client import redis_client
+from src.services.cache_service import LeaderboardPeriod
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -204,27 +205,20 @@ class LeaderboardResponse(BaseModel):
     
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
-async def get_leaderboard(days: int = Query(1, ge=1, le=7, description="Number of days to get leaderboard for"), db: Session = Depends(get_session)):
+async def get_leaderboard(
+    period: LeaderboardPeriod = Query(LeaderboardPeriod.ONE_DAY, description="Период для лидерборда: 1d, 1w, 1m, all"),
+    db: Session = Depends(get_session)
+):
     """
-    Получение лидерборда за определенное количество дней (1, 3 или 7 дней)
+    Получение лидерборда за определённый период (1d, 1w, 1m, all)
     """
     # 1. Получаем первый проект с is_leaderboard_project=True
     project = db.query(models.Project).filter(models.Project.is_leaderboard_project == True).first()
     if not project:
         return LeaderboardResponse(users=[])
 
-
-    from src.services import cache_service
-    if days == 1:
-        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ONE_DAY, db)
-    elif days == 3:
-        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.THREE_DAYS, db)
-    elif days == 7:
-        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ONE_WEEK, db)
-    else:
-        users = await utils.get_leaderboard(project, cache_service.LeaderboardPeriod.ALL_TIME, db)
-        
-    logger.info(f"[Leaderboard] Found {len(users)} users for project {project.name}, period {days} days")
+    users = await utils.get_leaderboard(project, period, db)
+    logger.info(f"[Leaderboard] Found {len(users)} users for project {project.name}, period {period}")
     # 3. Собираем leaderboard
     return LeaderboardResponse(users=users)
 

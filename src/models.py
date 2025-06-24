@@ -206,6 +206,10 @@ class SocialAccount(Base):
     twitter_scout_score = Column(Float, nullable=True)
     twitter_scout_score_updated_at = Column(Integer, nullable=True)
     
+    # последние данные которые мы извлекли при парсинге
+    last_avatar_url = Column(String, nullable=True, default=None, server_default=None)
+    last_followers_count = Column(Integer, nullable=True, default=None, server_default=None)
+    
     # флаг, чтобы не учитывать аккаунт в лидерборде
     is_disabled_for_leaderboard = Column(Boolean, nullable=False, default=False, server_default="false")
     

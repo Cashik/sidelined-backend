@@ -524,4 +524,10 @@ class LeaderboardUser(BaseModel):
     login: str
     followers: Optional[int] = None
     mindshare: float
+    engagement: float
     scores: float
+    scores_all_time: float
+    posts_period: int
+    posts_all_time: int
+    is_connected: bool = False
+    

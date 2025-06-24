@@ -5,13 +5,13 @@ from enum import Enum
 from src.services.redis_client import redis_client
 from src.config.settings import settings
 
-LEADERBOARD_CACHE_VERSION = 1
+LEADERBOARD_CACHE_VERSION = 1.2
 FEED_CACHE_VERSION = 1
 
 class LeaderboardPeriod(str, Enum):
     ONE_DAY = "1d"
-    THREE_DAYS = "3d"
     ONE_WEEK = "1w"
+    ONE_MONTH = "1m"
     ALL_TIME = "all"
     # можно добавить другие периоды 
 

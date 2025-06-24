@@ -310,6 +310,40 @@ def create_auto_yaps(project_name: str = None):
         session.close()
 
 
+def update_social_accounts_profile():
+    """
+    Обновить last_avatar_url и last_followers_count для всех SocialAccount на основе самого свежего поста.
+    """
+    session = SessionLocal()
+    updated = 0
+    try:
+        accounts = session.query(models.SocialAccount).all()
+        for account in accounts:
+            # Найти самый свежий пост
+            if not account.posts:
+                continue
+            latest_post = max(account.posts, key=lambda p: p.posted_at if hasattr(p, 'posted_at') else p.created_at)
+            # Извлечь данные через extract_profile_info_from_post
+            profile_url, followers_count = utils.extract_profile_info_from_post(latest_post)
+            changed = False
+            if profile_url and profile_url != account.last_avatar_url:
+                account.last_avatar_url = profile_url
+                changed = True
+            if followers_count is not None and followers_count != account.last_followers_count:
+                account.last_followers_count = followers_count
+                changed = True
+            if changed:
+                session.add(account)
+                updated += 1
+        session.commit()
+        print(f"Обновлено {updated} аккаунтов из {len(accounts)}.")
+    except Exception as e:
+        session.rollback()
+        print(f"Ошибка при обновлении профилей: {str(e)}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -362,6 +396,9 @@ def main():
     create_auto_yaps_parser = subparsers.add_parser('create-auto-yaps', help='Создать auto-yaps для проекта или всех проектов')
     create_auto_yaps_parser.add_argument('-n', '--name', required=False, help='Название проекта (если не указано, для всех проектов)')
 
+    # Команда обновления профиля соц. аккаунтов
+    update_social_accounts_profile_parser = subparsers.add_parser('update-social-accounts-profile', help='Обновить last_avatar_url и last_followers_count для всех SocialAccount на основе самого свежего поста')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -388,6 +425,8 @@ def main():
         update_users_xscore()
     elif args.command == 'create-auto-yaps':
         create_auto_yaps(args.name)
+    elif args.command == 'update-social-accounts-profile':
+        update_social_accounts_profile()
     else:
         parser.print_help()
 
@@ -406,6 +445,7 @@ python -m src.cli update-users-xscore
 python -m src.cli update-leaderboard
 python -m src.cli create-auto-yaps -n "ProjectName"
 python -m src.cli create-auto-yaps
+python -m src.cli update-social-accounts-profile
 """
 
 if __name__ == "__main__":

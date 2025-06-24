@@ -566,7 +566,7 @@ async def get_social_account_by_id(account_id: str, db: Session) -> Optional[mod
     stmt = select(models.SocialAccount).where(models.SocialAccount.social_id == account_id)
     return db.execute(stmt).scalar_one_or_none()
 
-async def create_social_account(account: models.SocialAccount, db: Session) -> models.SocialAccount:
+async def create_or_update_social_account(account: models.SocialAccount, db: Session) -> models.SocialAccount:
     """
     Создание нового аккаунта в социальной сети
     """
@@ -574,6 +574,7 @@ async def create_social_account(account: models.SocialAccount, db: Session) -> m
     db.commit()
     db.refresh(account)
     return account
+
 
 async def create_social_post(post: models.SocialPost, db: Session) -> models.SocialPost:
     """
