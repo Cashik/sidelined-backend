@@ -26,7 +26,7 @@ async def _master_update_async():
 @celery_app.task(
     bind=True,
     name="src.tasks.master_update.master_update",
-    max_retries=3,
+    max_retries=0,
     default_retry_delay=60,
 )
 def master_update(self):  # type: ignore[override]

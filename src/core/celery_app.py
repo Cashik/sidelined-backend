@@ -104,8 +104,8 @@ celery_app.conf.task_routes = {
 celery_app.conf.update(
     # Настройки worker'ов
     worker_prefetch_multiplier=1,  # Уменьшаем prefetch для равномерного распределения
-    task_acks_late=True,  # Подтверждаем задачи только после успешного выполнения
-    worker_max_tasks_per_child=1000,  # Перезапускаем worker каждые 1000 задач
+    task_acks_late=False,  # Подтверждаем задачи только после успешного выполнения
+    worker_max_tasks_per_child=10,  # Перезапускаем worker каждые 10 задач
     
     # Настройки сериализации
     task_serializer='json',
