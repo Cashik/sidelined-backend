@@ -1636,12 +1636,12 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         return
 
 
-async def cleanup_old_posts(db: Session):
+async def cleanup_old_posts(db: Session)->int:
     """
     Очищает старые посты после обновлений, чтобы не засорять базу.
     """
     cutoff_timestamp = now_timestamp() - settings.POST_TO_TRASH_LIFETIME_SECONDS
-    await crud.delete_old_posts(db, cutoff_timestamp)
+    return await crud.delete_old_posts(db, cutoff_timestamp)
 
 
 async def master_update(db: Session):
