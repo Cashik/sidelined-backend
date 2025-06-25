@@ -90,14 +90,14 @@ celery_app.conf.beat_schedule = {
     "master-update": {
         "task": "src.tasks.master_update.master_update",
         "schedule": settings.MASTER_UPDATE_PERIOD_SECONDS,
-        "options": {"queue": "default"},
+        "options": {"queue": "master_update"},
     },
 }
 
 # Роутинг задач
 celery_app.conf.task_routes = {
     "src.tasks.create_autoyaps.create_autoyaps": {"queue": "default"},
-    "src.tasks.master_update.master_update": {"queue": "default"},
+    "src.tasks.master_update.master_update": {"queue": "master_update"},
 }
 
 # Дополнительные настройки для стабильной работы
