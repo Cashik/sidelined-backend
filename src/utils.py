@@ -603,8 +603,8 @@ async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db
             )
             social_account_db = await crud.create_or_update_social_account(social_account_db, db)
         else:
-            # TODO: возможно, стоит обновлять реже каждый раз для нового поста
-            # обновляем только если аватарка изменилась
+            # TODO: обновлять аватар и подписчиков желательно только если проект в лидерборде.
+            # обновляем только если есть изменения
             need_update = False
             if source_data.legacy.profile_image_url_https is not None and social_account_db.last_avatar_url != source_data.legacy.profile_image_url_https:
                 social_account_db.last_avatar_url = source_data.legacy.profile_image_url_https

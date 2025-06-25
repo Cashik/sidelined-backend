@@ -164,7 +164,6 @@ class Project(Base):
     user_selected_projects = relationship("UserSelectedProject", back_populates="project", cascade="all, delete-orphan")
     posts_templates = relationship("PostTemplate", back_populates="project", cascade="all, delete-orphan")
     leaderboard_history = relationship("ProjectLeaderboardHistory", back_populates="project", cascade="all, delete-orphan")
-    engagements = relationship('ProjectEngagement', back_populates='project')
 
     def __str__(self) -> str:
         return f"{self.name}"
@@ -214,10 +213,13 @@ class SocialAccount(Base):
     is_disabled_for_leaderboard = Column(Boolean, nullable=False, default=False, server_default="false")
     
     # Relationships
-    posts = relationship("SocialPost", back_populates="account")
+    posts = relationship("SocialPost", back_populates="account", cascade="all, delete-orphan")
     projects = relationship("ProjectAccountStatus", back_populates="account")
-    engagements = relationship("ProjectEngagement", back_populates="social_account")
-    scores = relationship("ScorePayout", back_populates="social_account")
+    scores = relationship(
+        "ScorePayout",
+        back_populates="social_account",
+        cascade="all, delete-orphan"
+    )
     
     def __str__(self) -> str:
         if self.name:
@@ -406,36 +408,6 @@ class ProjectLeaderboardHistory(Base):
     # Relationships
     project = relationship("Project", back_populates="leaderboard_history")
     scores = relationship("ScorePayout", back_populates="project_leaderboard_history", cascade="all, delete-orphan")
-
-
-class ProjectEngagement(Base):
-    """
-    engagement, который вносит юзер в проект за определенный период.
-    
-    Это просто разница в статистике по всем постам юзера за определенный период.
-    Нужно потому, что статистика по постам не живучая, а так же чтобы избежать сложных извлечений данных из статистики по постам.
-    
-    Возможно, вообще не нужно)
-    """
-
-    __tablename__ = "project_engagement"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
-    
-    project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
-    social_account_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
-    
-    engagement = Column(Float, nullable=False)
-    # дублируем статистику на всякий, потому что статистика поста не живучая
-    likes = Column(Integer, nullable=False)
-    comments = Column(Integer, nullable=False)
-    reposts = Column(Integer, nullable=False)
-    views = Column(Integer, nullable=False)
-    
-    # Relationships
-    project = relationship("Project", back_populates="engagements")
-    social_account = relationship("SocialAccount", back_populates="engagements")
 
 
 class ScorePayout(Base):

@@ -2,8 +2,8 @@ import asyncio
 import argparse
 import logging
 import bcrypt
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func, and_
+from sqlalchemy.orm import Session, aliased
 
 from src.database import SessionLocal
 from src.models import User, Project, AdminUser
@@ -312,17 +312,37 @@ def create_auto_yaps(project_name: str = None):
 
 def update_social_accounts_profile():
     """
-    Обновить last_avatar_url и last_followers_count для всех SocialAccount на основе самого свежего поста.
+    Обновить last_avatar_url и last_followers_count только для SocialAccount, у которых есть хотя бы один пост с упоминанием проекта с is_leaderboard_project=True.
+    Для каждого аккаунта используется только самый свежий пост (по posted_at).
     """
+    from sqlalchemy import func, and_
+    from sqlalchemy.orm import aliased
     session = SessionLocal()
     updated = 0
     try:
-        accounts = session.query(models.SocialAccount).all()
-        for account in accounts:
-            # Найти самый свежий пост
-            if not account.posts:
-                continue
-            latest_post = max(account.posts, key=lambda p: p.posted_at if hasattr(p, 'posted_at') else p.created_at)
+        latest_post_subq = (
+            session.query(
+                models.SocialPost.account_id.label('account_id'),
+                func.max(models.SocialPost.posted_at).label('max_posted_at')
+            )
+            .group_by(models.SocialPost.account_id)
+            .subquery()
+        )
+        LatestPost = aliased(models.SocialPost)
+        results = (
+            session.query(models.SocialAccount, LatestPost)
+            .join(latest_post_subq, latest_post_subq.c.account_id == models.SocialAccount.id)
+            .join(LatestPost, and_(
+                LatestPost.account_id == models.SocialAccount.id,
+                LatestPost.posted_at == latest_post_subq.c.max_posted_at
+            ))
+            .join(models.ProjectMention, LatestPost.id == models.ProjectMention.post_id)
+            .join(models.Project, models.ProjectMention.project_id == models.Project.id)
+            .filter(models.Project.is_leaderboard_project == True)
+            .distinct()
+            .all()
+        )
+        for account, latest_post in results:
             # Извлечь данные через extract_profile_info_from_post
             profile_url, followers_count = utils.extract_profile_info_from_post(latest_post)
             changed = False
@@ -336,7 +356,7 @@ def update_social_accounts_profile():
                 session.add(account)
                 updated += 1
         session.commit()
-        print(f"Обновлено {updated} аккаунтов из {len(accounts)}.")
+        print(f"Обновлено {updated} аккаунтов из {len(results)}.")
     except Exception as e:
         session.rollback()
         print(f"Ошибка при обновлении профилей: {str(e)}")
@@ -367,6 +387,34 @@ def check_duplicates(clean: bool = False):
             print("\nДубликаты постов:")
             for post in report["posts"]:
                 print(f"  social_id: {post['social_id']}, оставлен id: {post['keep']}, удалены id: {post['delete']}")
+    finally:
+        session.close()
+
+
+def refresh_leaderboard_cache():
+    """
+    Обновить кеш лидерборда для всех проектов с is_leaderboard_project=True.
+    """
+    import asyncio
+    session = SessionLocal()
+    from src.utils import get_leaderboard
+    from src import models
+    from src.services.cache_service import LeaderboardPeriod
+    try:
+        projects = session.query(models.Project).filter(models.Project.is_leaderboard_project == True).all()
+        if not projects:
+            print("Нет проектов с is_leaderboard_project=True")
+            return
+        print(f"Обновление кеша лидерборда для {len(projects)} проектов...")
+        for project in projects:
+            print(f"  - {project.name} (id={project.id}) ...", end=" ")
+            try:
+                # Обновляем кеш только для ALL_TIME (этого достаточно)
+                asyncio.run(get_leaderboard(project, LeaderboardPeriod.ALL_TIME, session, force_rebuild=True))
+                print("OK")
+            except Exception as e:
+                print(f"Ошибка: {e}")
+        print("Обновление кеша завершено.")
     finally:
         session.close()
 
@@ -430,6 +478,9 @@ def main():
     check_dupes_parser = subparsers.add_parser('check-duplicates', help='Проверить и/или удалить дубликаты аккаунтов и постов')
     check_dupes_parser.add_argument('--clean', action='store_true', help='Удалить найденные дубликаты')
 
+    # Команда обновления кеша лидерборда для всех проектов
+    refresh_leaderboard_cache_parser = subparsers.add_parser('refresh-leaderboard-cache', help='Обновить кеш лидерборда для всех проектов с is_leaderboard_project=True')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -460,6 +511,8 @@ def main():
         update_social_accounts_profile()
     elif args.command == 'check-duplicates':
         check_duplicates(args.clean)
+    elif args.command == 'refresh-leaderboard-cache':
+        refresh_leaderboard_cache()
     else:
         parser.print_help()
 
@@ -480,6 +533,7 @@ python -m src.cli create-auto-yaps -n "ProjectName"
 python -m src.cli create-auto-yaps
 python -m src.cli update-social-accounts-profile
 python -m src.cli check-duplicates --clean
+python -m src.cli refresh-leaderboard-cache
 """
 
 if __name__ == "__main__":
