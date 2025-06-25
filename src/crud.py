@@ -1141,3 +1141,75 @@ def get_updated_posts(
     for post in posts:
         yield post
     
+
+async def check_for_unique(db: Session, delete: bool = False) -> dict:
+    """
+    Проверяет уникальность social_id/social_login для SocialAccount и social_id для SocialPost.
+    Если delete=True — удаляет дубликаты (оставляя экземпляр с минимальным id).
+    Возвращает подробный отчёт по найденным и удалённым дубликатам.
+    """
+    from sqlalchemy import func
+    report = {"accounts": [], "posts": []}
+    # --- SocialAccount: по social_id ---
+    acc_dupes = db.execute(
+        select(models.SocialAccount.social_id)
+        .group_by(models.SocialAccount.social_id)
+        .having(func.count(models.SocialAccount.id) > 1)
+    ).scalars().all()
+    for social_id in acc_dupes:
+        accs = db.query(models.SocialAccount).filter(models.SocialAccount.social_id == social_id).order_by(models.SocialAccount.id).all()
+        to_keep = accs[0]
+        to_delete = accs[1:]
+        report["accounts"].append({
+            "type": "social_id",
+            "value": social_id,
+            "keep": to_keep.id,
+            "delete": [a.id for a in to_delete]
+        })
+        if delete and to_delete:
+            for acc in to_delete:
+                db.delete(acc)
+    # --- SocialAccount: по social_login ---
+    login_dupes = db.execute(
+        select(models.SocialAccount.social_login)
+        .group_by(models.SocialAccount.social_login)
+        .having(func.count(models.SocialAccount.id) > 1)
+    ).scalars().all()
+    for login in login_dupes:
+        accs = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == login).order_by(models.SocialAccount.id).all()
+        to_keep = accs[0]
+        to_delete = accs[1:]
+        # Не дублируем, если уже учли по social_id
+        if to_keep.id in [x["keep"] for x in report["accounts"] if x["type"] == "social_id"]:
+            continue
+        report["accounts"].append({
+            "type": "social_login",
+            "value": login,
+            "keep": to_keep.id,
+            "delete": [a.id for a in to_delete]
+        })
+        if delete and to_delete:
+            for acc in to_delete:
+                db.delete(acc)
+    # --- SocialPost: по social_id ---
+    post_dupes = db.execute(
+        select(models.SocialPost.social_id)
+        .group_by(models.SocialPost.social_id)
+        .having(func.count(models.SocialPost.id) > 1)
+    ).scalars().all()
+    for social_id in post_dupes:
+        posts = db.query(models.SocialPost).filter(models.SocialPost.social_id == social_id).order_by(models.SocialPost.id).all()
+        to_keep = posts[0]
+        to_delete = posts[1:]
+        report["posts"].append({
+            "social_id": social_id,
+            "keep": to_keep.id,
+            "delete": [p.id for p in to_delete]
+        })
+        if delete and to_delete:
+            for post in to_delete:
+                db.delete(post)
+    if delete:
+        db.commit()
+    return report
+    

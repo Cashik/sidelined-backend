@@ -344,6 +344,33 @@ def update_social_accounts_profile():
         session.close()
 
 
+def check_duplicates(clean: bool = False):
+    """
+    Проверяет (и опционально удаляет) дубликаты аккаунтов и постов по social_id/social_login.
+    """
+    from src import crud
+    session = SessionLocal()
+    try:
+        report = asyncio.run(crud.check_for_unique(session, delete=clean))
+        if not clean:
+            print("Найдены дубликаты:")
+        else:
+            print("Удаление дубликатов завершено. Отчёт:")
+        if not report["accounts"] and not report["posts"]:
+            print("Дубликаты не найдены.")
+            return
+        if report["accounts"]:
+            print("\nДубликаты аккаунтов:")
+            for acc in report["accounts"]:
+                print(f"  Тип: {acc['type']}, значение: {acc['value']}, оставлен id: {acc['keep']}, удалены id: {acc['delete']}")
+        if report["posts"]:
+            print("\nДубликаты постов:")
+            for post in report["posts"]:
+                print(f"  social_id: {post['social_id']}, оставлен id: {post['keep']}, удалены id: {post['delete']}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -399,6 +426,10 @@ def main():
     # Команда обновления профиля соц. аккаунтов
     update_social_accounts_profile_parser = subparsers.add_parser('update-social-accounts-profile', help='Обновить last_avatar_url и last_followers_count для всех SocialAccount на основе самого свежего поста')
 
+    # Команда поиска и чистки дубликатов
+    check_dupes_parser = subparsers.add_parser('check-duplicates', help='Проверить и/или удалить дубликаты аккаунтов и постов')
+    check_dupes_parser.add_argument('--clean', action='store_true', help='Удалить найденные дубликаты')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -427,6 +458,8 @@ def main():
         create_auto_yaps(args.name)
     elif args.command == 'update-social-accounts-profile':
         update_social_accounts_profile()
+    elif args.command == 'check-duplicates':
+        check_duplicates(args.clean)
     else:
         parser.print_help()
 
@@ -446,6 +479,7 @@ python -m src.cli update-leaderboard
 python -m src.cli create-auto-yaps -n "ProjectName"
 python -m src.cli create-auto-yaps
 python -m src.cli update-social-accounts-profile
+python -m src.cli check-duplicates --clean
 """
 
 if __name__ == "__main__":
