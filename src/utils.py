@@ -1295,27 +1295,8 @@ Important rules for you:
     # 5. Post-processing and final tweet length validation
     cleaned: List[str] = []
     for tweet in result.variants:
-        tweet_clean = tweet.strip().replace("\n", " ")
-        if len(tweet_clean) > 280:
-            tweet_clean = tweet_clean[:277] + "…"
+        tweet_clean = tweet.strip()
         cleaned.append(tweet_clean)
-    
-    # Guarantee the required number of variants
-    if len(cleaned) != count:
-        cleaned = cleaned[:count]
-        while len(cleaned) < count:
-            # If not enough variants, duplicate the last one with small modifications
-            if cleaned:
-                base_tweet = cleaned[-1]
-                # Simple modification to create a variant
-                if "!" not in base_tweet and len(base_tweet) < 279:
-                    cleaned.append(base_tweet + "!")
-                elif "." in base_tweet:
-                    cleaned.append(base_tweet.replace(".", "..."))
-                else:
-                    cleaned.append(base_tweet)
-            else:
-                cleaned.append(original_text)  # Fallback to original text
     
     return cleaned
 
