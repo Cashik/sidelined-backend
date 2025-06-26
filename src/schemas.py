@@ -516,6 +516,7 @@ class PostExample(PostExampleCreate):
 class AutoYapsGenerationSettings(BaseModel):
     project_feed: List[Post]
     model: AIModel
+    project_name: str
 
 
 class LeaderboardUser(BaseModel):

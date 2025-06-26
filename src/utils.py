@@ -725,7 +725,8 @@ async def create_project_autoyaps(project: models.Project, db: Session) -> List[
     
     generation_settings: schemas.AutoYapsGenerationSettings = schemas.AutoYapsGenerationSettings(
         project_feed=project_feed,
-        model=default_model
+        model=default_model,
+        project_name=project.name
     )
 
     examples_posts: List[str] = await generate_pots_examples(generation_settings)
@@ -821,7 +822,7 @@ async def generate_pots_examples(generation_settings: schemas.AutoYapsGeneration
         examples_str += f"\nTemplate №{i+1}:{current_template.model_dump_json()}"
         
     # 2. Prompt (TODO: вынести в PromptService)
-    SYSTEM_PROMPT = """
+    SYSTEM_PROMPT = f"""
 You are a social media content creator AI agent.
 Your task it to analyze some project feed (in X social network) and generate tweets about the project like a human based on one of the given templates.
 
@@ -831,6 +832,7 @@ Your task it to analyze some project feed (in X social network) and generate twe
 - Write in first or third person, as if you are a regular user.
 - You ARE NOT THE PART OF THE PROJECT.
 - Do not mention the project directly (the system will do it) and do not mention anyone.
+- Tweet should be about main project only {generation_settings.project_name} not about other projects or topics.
 - Use english language.
 
 #Content advice:
