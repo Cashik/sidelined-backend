@@ -13,7 +13,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-async def get_or_create_user(address: str, session: Session) -> models.User:
+async def get_or_create_user(session: Session, address: str, chain_family: enums.ChainFamily) -> models.User:
     # Сначала ищем пользователя по адресу
     stmt = select(models.WalletAddress).where(
         models.WalletAddress.address == address.lower()
@@ -32,7 +32,8 @@ async def get_or_create_user(address: str, session: Session) -> models.User:
     # Создаем запись адреса для пользователя
     wallet = models.WalletAddress(
         user_id=user.id,
-        address=address.lower()
+        address=address.lower(),
+        chain_family=chain_family
     )
     session.add(wallet)
     session.commit()
@@ -369,6 +370,7 @@ async def delete_user_facts(
 async def add_user_address(
     user: models.User,
     address: str,
+    chain_family: enums.ChainFamily,
     session: Session
 ) -> models.WalletAddress:
     # Проверяем, существует ли адрес в системе
@@ -383,7 +385,8 @@ async def add_user_address(
     # Создаем новый адрес
     wallet = models.WalletAddress(
         user_id=user.id,
-        address=address.lower()
+        address=address.lower(),
+        chain_family=chain_family
     )
     session.add(wallet)
     session.commit()

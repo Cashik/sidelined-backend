@@ -12,6 +12,7 @@ openai
 google-genai
 eth-account
 eth-utils
+PyNaCl
 alembic-postgresql-enum
 requests
 mcp
@@ -30,3 +31,4 @@ python-multipart
 bcrypt
 itsdangerous>=2.1.0
 starlette-admin[sqlalchemy]
+base58

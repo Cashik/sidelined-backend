@@ -65,6 +65,7 @@ class WalletAddress(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
     address = Column(String, unique=True, nullable=False)  # Адрес в lowercase
+    chain_family = Column(postgresql.ENUM(enums.ChainFamily), nullable=False, default=enums.ChainFamily.EVM, server_default=enums.ChainFamily.EVM.value)
     created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
     
     # Relationships

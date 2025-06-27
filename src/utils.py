@@ -422,7 +422,6 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     Если и это нет, то выдаем Basic доступ.
     """
     # TODO: можно оптимизировать, сгруппировать по цепочкам или вручную проверять отдельно токены нашего проекта
-    
     web3_service = Web3Service(settings.ANKR_API_KEY)
     
     for plan in reversed(subscription_plans):
@@ -436,30 +435,34 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
         # Проверяем каждый адрес кошелька пользователя
         for wallet in user.wallet_addresses:
             user_address = wallet.address
-            # проверяем erc721 токены
-            if erc721_requirements:
-                try:
-                    for req in erc721_requirements:
-                        raw_balance = web3_service.get_ERC721_balance(req.token.address, user_address, req.token.chain_id)
-                        natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
-                        if natural_balance >= req.balance:
-                            logger.info(f"User {user_address} has enough ERC721 balance for {plan.id} subscription")
-                            return plan.id
-                except exceptions.Web3ServiceError as e:
-                    logger.error(f"Error checking ERC721 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
-                    pass
-            # проверяем erc20 токены
-            if erc20_requirements:
-                try:
-                    for req in erc20_requirements:
-                        raw_balance = web3_service.get_ERC20_balance(req.token.address, user_address, req.token.chain_id)
-                        natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
-                        if natural_balance >= req.balance:
-                            logger.info(f"User {user_address} has enough ERC20{req.token.name} balance({natural_balance}) for {plan.id} subscription")
-                            return plan.id
-                except exceptions.Web3ServiceError as e:
-                    logger.error(f"Error checking ERC20 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
-                    pass
+            if wallet.chain_family == enums.ChainFamily.SOLANA:
+                #TODO: проверка токенов для solana
+                logger.warn(f"Skip token validation for solana user_address={user_address} wallet_id={wallet.id}")
+            elif wallet.chain_family == enums.ChainFamily.EVM:
+                # проверяем erc721 токены
+                if erc721_requirements:
+                    try:
+                        for req in erc721_requirements:
+                            raw_balance = web3_service.get_ERC721_balance(req.token.address, user_address, req.token.chain_id)
+                            natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
+                            if natural_balance >= req.balance:
+                                logger.info(f"User {user_address} has enough ERC721 balance for {plan.id} subscription")
+                                return plan.id
+                    except exceptions.Web3ServiceError as e:
+                        logger.error(f"Error checking ERC721 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
+                        pass
+                # проверяем erc20 токены
+                if erc20_requirements:
+                    try:
+                        for req in erc20_requirements:
+                            raw_balance = web3_service.get_ERC20_balance(req.token.address, user_address, req.token.chain_id)
+                            natural_balance = web3_service.raw_balance_to_human(raw_balance, req.token.decimals)
+                            if natural_balance >= req.balance:
+                                logger.info(f"User {user_address} has enough ERC20{req.token.name} balance({natural_balance}) for {plan.id} subscription")
+                                return plan.id
+                    except exceptions.Web3ServiceError as e:
+                        logger.error(f"Error checking ERC20 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
+                        pass
     
     # не смогли найти ни одного требования, возвращаем базовый доступ юзера
     return user.subscription_plan

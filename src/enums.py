@@ -40,6 +40,10 @@ class TokenInterface(Enum):
     ERC721 = "erc721"
     ERC1155 = "erc1155"
     
+class ChainFamily(Enum):
+    EVM = "EVM"
+    SOLANA = "SOLANA"
+
 class MessageType(Enum):
     TEXT = "text"
     TOOL_CALL = "tool_call"

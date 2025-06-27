@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src import crud, schemas, utils, utils_base, enums, models
-from src.core.crypto import verify_signature, validate_payload
+from src.core.crypto import verify_signature, validate_payload, SOLANA_NETWORKS_IDS
 from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
@@ -21,23 +21,28 @@ logger = logging.getLogger(__name__)
 LOGIN_STATEMENT = "Sign in to Sidelined AI using your wallet with required tokens on balance."
 DOMAIN = settings.DOMAIN
 
-
 @router.post("/login", response_model=schemas.LoginResponse)
 async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
     logger.info(f"Login data received: {request}")
     
-    # Проверяем валидность payload'а
+    # Определяем семейство сети
+    if request.payload.chain_id in SOLANA_NETWORKS_IDS:
+        chain_family = enums.ChainFamily.SOLANA
+    else:
+        chain_family = enums.ChainFamily.EVM
+    
+    # Проверяем валидность payload и подписи
     if not validate_payload(request.payload):
         raise HTTPException(status_code=400, detail="Invalid payload")
     
-    # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Получаем или создаем пользователя
     user = await crud.get_or_create_user(
+        session=db,
         address=request.payload.address,
-        session=db
+        chain_family=chain_family
     )
     
     # Проверяем подписку

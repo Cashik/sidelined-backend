@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from src import schemas, enums, models, crud, utils, exceptions
-from src.core.crypto import verify_signature, validate_payload
+from src.core.crypto import verify_signature, validate_payload, SOLANA_NETWORKS_IDS
 from src.core.middleware import get_current_user
 from src.database import get_session
 from src.config.settings import settings
@@ -118,19 +118,25 @@ async def add_wallet_address(
     
     Проверяет подпись и добавляет адрес, если она валидна
     """
+    if request.payload.chain_id in SOLANA_NETWORKS_IDS:
+        chain_family = enums.ChainFamily.SOLANA
+    else:
+        chain_family = enums.ChainFamily.EVM
+    
     # Проверяем валидность payload'а
     if not validate_payload(request.payload):
-        raise APIError(code="invalid_payload", message="Некорректный payload", status_code=400)
+        raise APIError(code="invalid_payload", message="Invalid payload", status_code=400)
     
     # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
-        raise APIError(code="invalid_signature", message="Неверная подпись", status_code=401)
+        raise APIError(code="invalid_signature", message="Invalid signature", status_code=401)
     
     try:
         # Добавляем адрес
         wallet = await crud.add_user_address(
             user=user,
             address=request.payload.address,
+            chain_family=chain_family,
             session=db
         )
         return schemas.WalletAddress(

@@ -5,10 +5,18 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 import random
+import base64
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
+import base58
 
-from src import schemas
+from src import schemas, enums
 
 logger = logging.getLogger(__name__)
+
+SOLANA_NETWORKS_IDS = [101]
+
+
 
 def verify_signature(payload: schemas.LoginPayload, signature: str) -> bool:
     """
@@ -22,13 +30,25 @@ def verify_signature(payload: schemas.LoginPayload, signature: str) -> bool:
     Returns:
         True если подпись валидна, False в противном случае
     """
+    
+    if payload.chain_id in SOLANA_NETWORKS_IDS:
+        family = enums.ChainFamily.SOLANA
+    else:
+        family = enums.ChainFamily.EVM
+    
     try:
         logger.info(f"Verifying signature for address: {payload.address}")
         logger.info(f"Payload data: {payload.dict()}")
         
         # Точное воспроизведение логики из кода thirdweb
         # 1. Формируем заголовок и адрес
-        type_field = "Ethereum"
+        if family == enums.ChainFamily.EVM:
+            type_field = "Ethereum"
+        elif family == enums.ChainFamily.SOLANA:
+            type_field = "Solana"
+        else:
+            raise ValueError(f"Invalid chain family: {family}")
+        
         header = f"{payload.domain} wants you to sign in with your {type_field} account:"
         # prefix = [header, payload.address].join("\n") - JavaScript
         prefix = "\n".join([header, payload.address])
@@ -69,22 +89,51 @@ def verify_signature(payload: schemas.LoginPayload, signature: str) -> bool:
         
         logger.info(f"Generated message exactly matching thirdweb format: {message_to_sign}")
         
-        # Создаем сообщение для проверки
-        message = encode_defunct(text=message_to_sign)
         
-        # Получаем адрес из подписи
-        recovered_address = Account.recover_message(message, signature=signature)
-        logger.info(f"Recovered address: {recovered_address}")
-        
-        # Сравниваем восстановленный адрес с адресом в payload
-        is_valid = to_checksum_address(recovered_address) == to_checksum_address(payload.address)
-        
-        if is_valid:
-            logger.info("Signature verification successful")
-        else:
-            logger.warning(f"Signature verification failed for address {payload.address}")
-            logger.warning(f"Expected: {payload.address}, got: {recovered_address}")
+        if family == enums.ChainFamily.EVM:
+            # Создаем сообщение для проверки
+            message = encode_defunct(text=message_to_sign)
             
+            # Получаем адрес из подписи
+            recovered_address = Account.recover_message(message, signature=signature)
+            logger.info(f"Recovered address: {recovered_address}")
+            
+            # Сравниваем восстановленный адрес с адресом в payload
+            is_valid = to_checksum_address(recovered_address) == to_checksum_address(payload.address)
+            
+            if is_valid:
+                logger.info("Signature verification successful")
+            else:
+                logger.warning(f"Signature verification failed for address {payload.address}")
+                logger.warning(f"Expected: {payload.address}, got: {recovered_address}")
+        elif family == enums.ChainFamily.SOLANA:
+            try:
+                logger.info("Verifying Solana signature")
+                
+                # Декодируем адрес (публичный ключ) из base58
+                public_key_bytes = base58.b58decode(payload.address)
+                
+                # Создаем объект VerifyKey
+                verify_key = VerifyKey(public_key_bytes)
+                
+                # Декодируем подпись из base64, как это делает фронтенд
+                signature_bytes = base64.b64decode(signature)
+                
+                # Кодируем сообщение в байты
+                message_bytes = message_to_sign.encode('utf-8')
+                
+                # Проверяем подпись. Если подпись неверна, будет выброшено исключение.
+                verify_key.verify(message_bytes, signature_bytes)
+                
+                logger.info(f"Solana signature verification successful for address {payload.address}")
+                is_valid = True
+            except BadSignatureError:
+                logger.warning(f"Invalid Solana signature for address {payload.address}")
+                is_valid = False
+            except Exception as e:
+                logger.error(f"An unexpected error occurred during Solana signature verification: {e}")
+                is_valid = False
+                
         return is_valid
         
     except Exception as e:
@@ -92,7 +141,7 @@ def verify_signature(payload: schemas.LoginPayload, signature: str) -> bool:
         return False
 
 
-def is_valid_address(address: str) -> bool:
+def is_valid_eth_address(address: str) -> bool:
     """
     Проверяет, что строка является валидным Ethereum адресом
     
@@ -121,6 +170,23 @@ def is_valid_address(address: str) -> bool:
     except Exception as e:
         logger.error(f"Error validating address: {str(e)}")
         return False
+
+def is_valid_solana_address(address: str) -> bool:
+    """
+    Проверяет, что строка является валидным Solana адресом (формат Base58)
+    """
+    try:
+        # Попытка декодирования из Base58
+        decoded_bytes = base58.b58decode(address)
+        # Публичный ключ в Solana имеет длину 32 байта
+        if len(decoded_bytes) == 32:
+            return True
+        logger.warning(f"Invalid Solana address length: {len(decoded_bytes)} bytes for address {address}")
+        return False
+    except Exception:
+        logger.warning(f"Invalid Base58 format for Solana address: {address}")
+        return False
+
 
 def create_login_payload(
     address: str,
@@ -172,8 +238,21 @@ def validate_payload(payload: schemas.LoginPayload) -> bool:
         bool: True если payload валиден, False в противном случае
     """
     try:
-        # Проверяем валидность адреса
-        if not is_valid_address(payload.address):
+        if payload.chain_id in SOLANA_NETWORKS_IDS:
+            family = enums.ChainFamily.SOLANA
+        else:
+            family = enums.ChainFamily.EVM
+
+        # Проверяем валидность адреса в зависимости от семейства
+        if family == enums.ChainFamily.EVM:
+            if not is_valid_eth_address(payload.address):
+                return False
+        elif family == enums.ChainFamily.SOLANA:
+            if not is_valid_solana_address(payload.address):
+                return False
+        else:
+            # На случай, если появятся новые семейства, а логика не будет добавлена
+            logger.error(f"Unknown chain family for address validation: {family}")
             return False
             
         # Проверяем время
