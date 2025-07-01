@@ -4,6 +4,8 @@ import logging
 import bcrypt
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session, aliased
+import requests
+import json
 
 from src.database import SessionLocal
 from src.models import User, Project, AdminUser
@@ -419,6 +421,28 @@ def refresh_leaderboard_cache():
         session.close()
 
 
+def get_arbus_score(handle: str, api_key: str):
+    """
+    Получить Arbus AI influence score для Twitter-аккаунта
+    """
+    url = f"https://api.arbus.ai/v1/arbus-score"
+    params = {
+        "twitter_handle": handle,
+        "key": api_key
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        try:
+            data = response.json()
+        except Exception:
+            print(f"Ошибка: не удалось декодировать ответ API как JSON. Код: {response.status_code}")
+            print(response.text)
+            return
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    except Exception as e:
+        print(f"Ошибка при запросе к Arbus API: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -481,6 +505,10 @@ def main():
     # Команда обновления кеша лидерборда для всех проектов
     refresh_leaderboard_cache_parser = subparsers.add_parser('refresh-leaderboard-cache', help='Обновить кеш лидерборда для всех проектов с is_leaderboard_project=True')
 
+    # Команда получения Arbus Score
+    arbus_score_parser = subparsers.add_parser('get-arbus-score', help='Получить Arbus AI influence score для Twitter-аккаунта')
+    arbus_score_parser.add_argument('--handle', '-l', required=True, help='Twitter handle (ник без @)')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -513,6 +541,8 @@ def main():
         check_duplicates(args.clean)
     elif args.command == 'refresh-leaderboard-cache':
         refresh_leaderboard_cache()
+    elif args.command == 'get-arbus-score':
+        get_arbus_score(args.handle, "AIzaSyDkiIG4QdLvYsSzlPMh238BwGZtQZQjop0")
     else:
         parser.print_help()
 
@@ -534,6 +564,7 @@ python -m src.cli create-auto-yaps
 python -m src.cli update-social-accounts-profile
 python -m src.cli check-duplicates --clean
 python -m src.cli refresh-leaderboard-cache
+python -m src.cli get-arbus-score -l "HANDLE"
 """
 
 if __name__ == "__main__":

@@ -57,6 +57,7 @@ def catch_errors(fn: Callable[..., Any]) -> Callable[..., Any]:
             return json.dumps({"error": str(e) if debug else "Error occurred while executing tool."})
     return _sync  
 
+# TODO: не используется
 async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: int, db: Session) -> List[schemas.MessageUnion]:
     """
     Получение ответа от ИИ на основе контекста чата
@@ -182,6 +183,7 @@ async def get_ai_answer(generate_data: schemas.AssistantGenerateData, user_id: i
         
         return [answer_message]
 
+# TODO: не используется
 async def generate_ai_response(prompt_service: PromptService, tools: List[schemas.Tool] = []) -> schemas.GeneratedResponse:
     from langchain.chat_models import init_chat_model
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -259,47 +261,27 @@ def to_sse(event_type: str, payload: dict) -> str:
     return f'data:{json.dumps({"type": event_type, **payload}, ensure_ascii=False)}\n\n'
 
 async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncGenerator[str, None]:
-    from langchain.chat_models import init_chat_model
-    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-    from langchain.agents import create_tool_calling_agent, AgentExecutor
-    from langchain_mcp_adapters.client import MultiServerMCPClient, SSEConnection
+    import time
+    import os
+    from langgraph.prebuilt import create_react_agent
+    from langchain_core.tools import tool
+    from langchain_core.messages import ToolMessage
+
+    # --- Сбор тулзов MCP ---
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
     from src.config.mcp_servers import mcp_servers as mcp_servers_list
     from src.config.mcp_servers import prebuild_toolboxes
+    from src import utils_base
 
-    logger.info(f"Generating response for prompt: {prompt_service.generate_data.chat.messages}")
-    logger.info(f"Model: {prompt_service.generate_data.chat_settings.model}")
+    start_ts = utils_base.now_timestamp()
+
+    logger.info(f"[Generation]: Generating response for prompt: {prompt_service.generate_data.chat.messages}")
+    logger.info(f"[Generation]: Model: {prompt_service.generate_data.chat_settings.model}")
     
     messages = prompt_service.generate_langchain_messages()
 
-    logger.info(f"Sending request to Gemini with messages: {messages}")
     
-    prompt = ChatPromptTemplate.from_messages([
-        MessagesPlaceholder("chat_history"),
-        MessagesPlaceholder("agent_scratchpad")
-    ])
-
-    model_provider = ""
-    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_5_FLASH, enums.Model.GEMINI_2_5_PRO]:
-        model_provider = "google_genai"
-    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4_1, enums.Model.GPT_O4_MINI, enums.Model.GPT_4O]:
-        model_provider = "openai"
-    else:
-        raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
-
-    api_key = ""
-    if model_provider == "google_genai":
-        api_key = settings.GEMINI_API_KEY
-    elif model_provider == "openai":
-        api_key = settings.OPENAI_API_KEY
-    else:
-        raise NotImplementedError(f"Provider \"{model_provider}\" do not turned on!")
-
-    llm = init_chat_model(
-        model=prompt_service.generate_data.chat_settings.model.value,
-        model_provider=model_provider,
-        api_key=api_key
-    )
-
     mcp_servers = {}
     for toolbox_id, server in mcp_servers_list.items():
         mcp_server = {
@@ -308,11 +290,9 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
         }
         if toolbox_id in prompt_service.generate_data.toolbox_ids:
             mcp_servers[server.name] = mcp_server
-    
     mcp_multi_client = MultiServerMCPClient(mcp_servers)
-    
     # Генерируем ответ, используя MCP инструменты
-    logger.info(f"Generating response with MCP tools ...")
+
     tools = await mcp_multi_client.get_tools()
     
     # расширяем инструменты дефолтным тулбоксом
@@ -327,28 +307,47 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
         elif hasattr(tool, "coroutine") and callable(tool.coroutine):
             tool.coroutine = catch_errors(tool.coroutine)  # async-инструмент
         else:
-            logger.error(f"Error: Tool {tool.name} has no func or coroutine attribute")
+            logger.error(f"Error: Tool {tool} has no func or coroutine attribute")
 
-    agent = create_tool_calling_agent(
-        llm=llm,
-        tools=tools,
-        prompt=prompt
+    # Инициализируем модель
+    model_provider = ""
+    if prompt_service.generate_data.chat_settings.model in [enums.Model.GEMINI_2_5_FLASH, enums.Model.GEMINI_2_5_PRO]:
+        model_provider = "google_genai"
+    elif prompt_service.generate_data.chat_settings.model in [enums.Model.GPT_4_1, enums.Model.GPT_O4_MINI, enums.Model.GPT_4O]:
+        model_provider = "openai"
+    else:
+        raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
+
+    api_key = ""
+    import os
+    if model_provider == "google_genai":
+        api_key = settings.GEMINI_API_KEY
+        os.environ["GOOGLE_API_KEY"] = api_key
+    elif model_provider == "openai":
+        api_key = settings.OPENAI_API_KEY
+        tools.append({"type": "web_search_preview"})
+        os.environ["OPENAI_API_KEY"] = api_key
+    else:
+        raise NotImplementedError(f"Provider \"{model_provider}\" do not turned on!")
+
+    logger.info(f"[Generation]:{utils_base.now_timestamp() - start_ts} Using model: {model_provider}:{prompt_service.generate_data.chat_settings.model.value}")
+
+     # --- Создаём агента через LangGraph ---
+    agent = create_react_agent(
+        model=f"{model_provider}:{prompt_service.generate_data.chat_settings.model.value}",
+        tools=tools
+        # prompt/prompt_template если хочешь переопределять, но в большинстве случаев дефолт ок!
     )
-    
-    executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        max_iterations=10, #TODO: add max_iterations
-        verbose=settings.DEBUG
-    )
+
+    #test_response = agent.invoke({"messages": [{"role": "user", "content": "What is the weather in Tokyo?"}]})
+    #logger.info(f"Test response: {test_response}")
+
     yield to_sse("generation_start", {"chat_id": prompt_service.generate_data.chat.id})
     cur_msg_id = None # для группировки чанков
     starts_of_events = dict()  # id -> timestamp
-    
+    logger.info(f"[Generation]:{utils_base.now_timestamp() - start_ts} Stream started")
     try:
-        async for ev in executor.astream_events(
-            {"chat_history": messages}
-        ):
+        async for ev in agent.astream_events({"messages": messages}):
             kind = ev["event"]
 
             # 1. начало нового assistant-сообщения
@@ -361,12 +360,12 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
             elif kind == "on_chat_model_stream":
                 ch = ev["data"]["chunk"]
                 if ch.content:                       # пропускаем tool-JSON
-                    yield to_sse("message_chunk",{"id": cur_msg_id, "text": ch.content})
+                    yield to_sse("message_chunk",{"id": cur_msg_id, "text": ch.text()})
 
             # 3. конец сообщения
             elif kind == "on_chat_model_end":
                 logger.info(f"on_chat_model_end: {ev}")
-                answer = ev["data"]["output"].content
+                answer = ev["data"]["output"].text()
                 start = starts_of_events.get(cur_msg_id)
                 generation_time_ms = int((time.time() - start) * 1000) if start else 0
                 starts_of_events.pop(cur_msg_id, None)
@@ -391,13 +390,22 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
                 start = starts_of_events.get(ev["run_id"])
                 generation_time_ms = int((time.time() - start) * 1000) if start else 0
                 starts_of_events.pop(ev["run_id"], None)
+
+                output = ev["data"]["output"]
+                if isinstance(output, ToolMessage):
+                    output = output.content
+
                 yield to_sse("tool_result",{
                     "id": ev["run_id"],
                     "name": ev["name"],
                     "args": ev["data"]["input"],
-                    "output": ev["data"]["output"],
+                    "output": output,
                     "generation_time_ms": generation_time_ms
                 })
+            else:
+                #logger.info(f"Unknown event: {ev}")
+                pass
+                
     except Exception as e:
         logger.error(f"Error generating AI response: {e}", exc_info=True)
         error_message = f"Sorry, but some error occurred and I can't fully answer your request. Try to use other model or ask another question."

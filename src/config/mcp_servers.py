@@ -36,7 +36,7 @@ if settings.EVM_AGENT_KIT_SSE_URL:
     )
 
 prebuild_toolboxes = []
-if True:
+if False:
     wrapper = DuckDuckGoSearchAPIWrapper(max_results=6, source="news")
     news_search_api = DuckDuckGoSearchResults(api_wrapper=wrapper, output_format="json")          # уже BaseTool
     args_schema = {
