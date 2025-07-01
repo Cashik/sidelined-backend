@@ -46,7 +46,7 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     )
     
     # Проверяем подписку
-    subscription_check: enums.SubscriptionPlanType = await utils.check_user_access(user)
+    subscription_check: enums.SubscriptionPlanType = await utils.check_user_subscription(user, db)
     
     # Создаем токен
     token_payload = schemas.TokenPayload(
