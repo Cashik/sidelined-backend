@@ -12,7 +12,7 @@ import time
 from uuid import uuid4
 
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
-from src.core.middleware import get_current_user, check_balance_and_update_token
+from src.core.middleware import get_current_user
 from src.database import get_session
 from src.services import user_context_service
 from src.config.settings import settings
@@ -174,7 +174,6 @@ class YapsPersonalizationResponse(BaseModel):
 async def personalize(
     request: YapsPersonalizationRequest,
     user: models.User = Depends(get_current_user),
-    user_subscription_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session)
 ):
     """
@@ -182,7 +181,8 @@ async def personalize(
     """
     PERSONALIZATION_CREDITS_COST = 1
     # Получаем тариф пользователя по актуальному типу подписки
-    user_subscription = get_subscription_plan(user_subscription_id)
+    user_plan: enums.SubscriptionPlanType = await utils.check_user_subscription(user, db)
+    user_subscription = get_subscription_plan(user_plan)
     # Проверяем лимит кредитов
     if user.used_credits_today + PERSONALIZATION_CREDITS_COST > user_subscription.max_credits:
         raise exceptions.APIError(code="out_of_credits", message="Out of credits. Try again tomorrow.", status_code=403)

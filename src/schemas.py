@@ -68,6 +68,8 @@ class UserChatSettings(BaseModel):
     preferred_chat_style: Optional[enums.ChatStyle] = None
     preferred_chat_details_level: Optional[enums.ChatDetailsLevel] = None
 
+
+
 class User(BaseModel):
     profile: UserProfile
     chat_settings: UserChatSettings
@@ -292,7 +294,10 @@ class AIModel(BaseModel):
     output_types: list[enums.MessageType] = [enums.MessageType.TEXT, enums.MessageType.TOOL_CALL]
 
 # Схемы для подписок
-
+class CurrentSubscribtion(BaseModel):
+    subscription_id: enums.SubscriptionPlanType
+    credits_left: int
+    
 class SubscriptionPlan(BaseModel):
     id: enums.SubscriptionPlanType
     name: str
@@ -531,4 +536,4 @@ class LeaderboardUser(BaseModel):
     posts_period: int
     posts_all_time: int
     is_connected: bool = False
-    
+

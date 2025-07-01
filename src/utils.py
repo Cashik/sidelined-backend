@@ -17,7 +17,7 @@ import requests
 import inspect
 from collections import defaultdict
 
-from src import schemas, enums, models, exceptions, crud
+from src import schemas, enums, models, exceptions, crud, utils_base
 from src.config.settings import settings
 from src.config.subscription_plans import subscription_plans
 from src.config.ai_models import all_ai_models as ai_models
@@ -474,6 +474,26 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
     
     # не смогли найти ни одного требования, возвращаем базовый доступ юзера
     return user.subscription_plan
+
+async def check_user_subscription(user: models.User, db: Session) -> enums.SubscriptionPlanType:
+    """
+    Проверка подписки пользователя.
+    """
+    logger.info(f"check_user_subscription: {user.id}")
+    user_plan_check: models.UserPlanCheck | None = crud.get_user_last_plan_check(db, user.id)
+    logger.info(f"check_user_subscription: {user_plan_check}")
+    if user_plan_check:
+        logger.info(f"check_user_subscription: {user_plan_check.created_at + settings.BALANCE_CHECK_LIFETIME_SECONDS} > {utils_base.now_timestamp()}")
+        if user_plan_check.created_at + settings.BALANCE_CHECK_LIFETIME_SECONDS > utils_base.now_timestamp():
+            logger.info(f"check_user_subscription: {user_plan_check.user_plan}")
+            return user_plan_check.user_plan
+    logger.info(f"check_user_subscription: no valid check")
+    # Нет валидной проверки, создаем новую
+    current_plan: enums.SubscriptionPlanType = await check_user_access(user)
+    # сохраняем проверку
+    crud.create_user_plan_check(db, user.id, current_plan)
+    # возвращаем текущую подписку
+    return current_plan
 
 from src.services.x_api_service import *
 

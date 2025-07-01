@@ -37,7 +37,7 @@ class WalletAddressDeleteRequest(BaseModel):
     address: str
 
 
-def db_user_to_schema_user(user: models.User) -> schemas.User:
+async def db_user_to_schema_user(user: models.User, db: Session) -> schemas.User:
     facts = [schemas.UserFact(id=fact.id, description=fact.description, created_at=fact.created_at) for fact in user.facts]
     wallet_addresses = [schemas.WalletAddress(address=wallet.address, created_at=wallet.created_at) for wallet in user.wallet_addresses]
     if user.chat_settings:
@@ -63,8 +63,8 @@ def db_user_to_schema_user(user: models.User) -> schemas.User:
 
 
 @router.get("/me", response_model=schemas.User)
-async def get_user(user: models.User = Depends(get_current_user)):
-    return db_user_to_schema_user(user)
+async def get_user(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    return await db_user_to_schema_user(user, db)
 
 
 @router.post("/settings/chat", response_model=schemas.UserChatSettings)
@@ -87,20 +87,20 @@ async def update_chat_settings(request: ChatSettingsUpdateRequest, user: models.
 @router.post("/settings/profile", response_model=schemas.User)
 async def update_user_settings(request: UserProfileUpdateRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     user_data: models.User = await crud.update_user_profile(user, request, db)
-    return db_user_to_schema_user(user_data)
+    return await db_user_to_schema_user(user_data, db)
 
 
 @router.post("/facts/add", response_model=schemas.User)
 async def add_user_fact(request: UserFactAddRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     user_data: models.User = await crud.add_user_facts(user, [request.description], db)
-    return db_user_to_schema_user(user_data)
+    return await db_user_to_schema_user(user_data, db)
 
 
 @router.post("/facts/delete", response_model=schemas.User)
 async def delete_user_fact(request: UserFactDeleteRequest, user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     try:
         user_data: models.User = await crud.delete_user_facts(user, [request.id], db)
-        return db_user_to_schema_user(user_data)
+        return await db_user_to_schema_user(user_data, db)
     except FactNotFoundError as e:
         raise APIError(code=e.code, message=e.message, status_code=400)
     except Exception as e:

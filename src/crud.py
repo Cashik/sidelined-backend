@@ -1215,4 +1215,23 @@ async def check_for_unique(db: Session, delete: bool = False) -> dict:
     if delete:
         db.commit()
     return report
-    
+
+
+def get_user_last_plan_check(db: Session, user_id: int) -> models.UserPlanCheck | None:
+    """
+    Получение последнего check для пользователя.
+    """
+    return db.query(models.UserPlanCheck).filter(
+        models.UserPlanCheck.user_id == user_id
+    ).order_by(desc(models.UserPlanCheck.created_at)).first()
+
+
+def create_user_plan_check(db: Session, user_id: int, user_plan: enums.SubscriptionPlanType):
+    """
+    Создание check для пользователя.
+    """
+    db_user_plan_check = models.UserPlanCheck(user_id=user_id, user_plan=user_plan)
+    db.add(db_user_plan_check)
+    db.commit()
+    db.refresh(db_user_plan_check)
+    return db_user_plan_check

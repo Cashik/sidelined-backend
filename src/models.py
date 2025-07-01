@@ -39,6 +39,7 @@ class User(Base):
     wallet_addresses = relationship("WalletAddress", back_populates="user")
     promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
     selected_projects = relationship("UserSelectedProject", back_populates="user")
+    user_plan_check = relationship("UserPlanCheck", back_populates="user")
 
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
@@ -58,6 +59,17 @@ class User(Base):
             return enums.SubscriptionPlanType.PRO
         else:
             return enums.SubscriptionPlanType.BASIC
+
+
+class UserPlanCheck(Base):
+    __tablename__ = "user_plan_check"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    user_plan = Column(postgresql.ENUM(enums.SubscriptionPlanType), nullable=False)
+
+    user = relationship("User", back_populates="user_plan_check")
 
 class WalletAddress(Base):
     __tablename__ = "wallet_address"

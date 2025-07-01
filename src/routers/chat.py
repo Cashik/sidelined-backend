@@ -11,7 +11,7 @@ from jsonschema import validate, ValidationError
 import time
 
 from src import schemas, enums, models, crud, utils, utils_base, exceptions
-from src.core.middleware import get_current_user, check_balance_and_update_token
+from src.core.middleware import get_current_user
 from src.database import get_session
 from src.services import user_context_service
 from src.config.settings import settings
@@ -265,26 +265,18 @@ async def stream_and_collect_messages(
     return
 
 
-@router.post("/message/regenerate", response_model=CreateMessageResponse)
-async def regenerate_message(
-    request: RegenerateMessageRequest,
-    user: models.User = Depends(get_current_user),
-    available_balance: bool = Depends(check_balance_and_update_token),
-    db: Session = Depends(get_session),
-):
-    raise HTTPException(status_code=501, detail="This feature temporarily disabled")
-
-
 @router.post("/message/stream", response_model=CreateMessageResponse)
 async def create_message_stream(
     create_message_request: UserMessageCreateRequest,
     background_tasks: BackgroundTasks,
     user: models.User = Depends(get_current_user),
-    user_subscription_id: enums.SubscriptionPlanType = Depends(check_balance_and_update_token),
     db: Session = Depends(get_session)
 ):
     # получаем подписку пользователя
-    user_subscription: schemas.SubscriptionPlanExtended = subscription_plans.get_subscription_plan(user_subscription_id)
+    start_time = time.time()
+    user_plan: enums.SubscriptionPlanType = await utils.check_user_subscription(user, db)
+    user_subscription: schemas.SubscriptionPlanExtended = subscription_plans.get_subscription_plan(user_plan)
+    logger.info(f"User plan: {user_plan}, time: {time.time() - start_time}")
     # получаем доступные модели для пользователя
     available_models = [model for model in user_subscription.available_models_ids]
     # если модель не указана, то разрешаем использовать дефолтную модель
