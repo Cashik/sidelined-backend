@@ -35,3 +35,35 @@ def timestamp_to_X_date(timestamp: int) -> str:
     """
     
     return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def streak_to_multiplier(streak: int) -> float:
+    # рассчитывает мультипликатор за серию
+    if streak == 0:
+        return 1
+    elif streak == 1:
+        return 1.25
+    else:
+        return 1.5
+    
+
+def loyalty_to_multiplier(user_loyalty: int) -> float:
+    # рассчитывает мультипликатор за лояльность
+    loyalty_to_bonus = {
+        10: 1.125,
+        20: 1.25,
+        30: 1.35,
+        40: 1.5,
+        50: 1.75,
+        60: 2,
+        70: 2.25,
+        80: 2.5,
+        90: 2.75,
+        100: 3
+    }
+    max_multiplier = 1
+    for loyalty, multiplier in loyalty_to_bonus.items():
+        if user_loyalty >= loyalty:
+            max_multiplier = max(max_multiplier, multiplier)
+    return max_multiplier
+    

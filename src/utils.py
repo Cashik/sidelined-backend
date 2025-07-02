@@ -1411,7 +1411,7 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     period_end = NOW_TS
     # Ограничиваем период, чтобы не обрабатывать сразу слишком много постов
     if period_end - period_start > HOUR_PERIOD*24:
-        period_end = period_start + HOUR_PERIOD*24
+        period_end = min(period_start + HOUR_PERIOD*24, NOW_TS)
         logger.info(f"[Leaderboard] Period is too long, limiting to 24 hours: {period_end}")
         
         
@@ -1419,7 +1419,6 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     period_seconds = period_end - period_start
 
     # 2. Получаем посты с упоминанием проекта, у которых есть статистика за период
-    # TODO: тут не совпадает описание тк мы по факту берем именно посты которые были созданы за период, а не обновлены
     posts_generator = crud.get_updated_posts(db, project, period_start, period_end, batch_size=500)
     logger.info(f"[Leaderboard] Posts fetched")
 
@@ -1464,6 +1463,8 @@ async def update_project_leaderboard(project: models.Project, db: Session):
             # Получаем xscore (или 50)
             # TODO: скоры желательно получать по API
             xscore = post.account.twitter_scout_score if post.account.twitter_scout_score is not None else 1
+            # дополнительно ограничиваем снизу, чтобы не было 0
+            xscore = max(xscore, 1)
             user_stats[acc_id] = ProjectLeaderboardUser()
             user_stats[acc_id].xscore = xscore
             user_stats[acc_id].payout = models.ScorePayout(
@@ -1481,151 +1482,138 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     if not user_stats:
         logger.warning(f"[Leaderboard] No user engagement for leaderboard update for project {project.id}")
         logger.info(f"[Leaderboard] Stats processed: {total_stats_processed}, posts with engagement: {posts_with_engagement}")
-        return
 
     # 4. Считаем суммарные xscore и engagement
-    sum_xscore = 1
-    sum_engagement = 1
+    sum_xscore = 0
+    sum_engagement = 0
     for user in user_stats.values():
         sum_xscore += user.xscore
         sum_engagement += user.payout.engagement
     logger.info(f"[Leaderboard] Users: {len(user_stats)}, sum_xscore: {sum_xscore}, sum_engagement: {sum_engagement}")
-    if sum_engagement == 0:
-        logger.warning(f"[Leaderboard] Zero engagement for leaderboard update for project {project.id}")
-        return
+    if sum_engagement > 0:
 
-    # 5. Считаем period_reward (при условии, что за 24 часа должны раздать 1000 base_score)
-    period_reward = 1000 * (period_seconds / 86400)
-    logger.info(f"[Leaderboard] period_reward: {period_reward:.2f} for {period_seconds} seconds")
+        # 5. Считаем period_reward (при условии, что за 24 часа должны раздать 1000 base_score)
+        period_reward = 1000 * (period_seconds / 86400)
+        logger.info(f"[Leaderboard] period_reward: {period_reward:.2f} for {period_seconds} seconds")
 
-    # 6. Для каждого автора считаем XUSD, EDS, mindshare, base_score, score
-    total_mindshare = 0
-    total_base_score = 0
-    total_score = 0
-    for social_account_id, user in user_stats.items():
-        XUSD = user.xscore / sum_xscore
-        EDS = user.payout.engagement / sum_engagement
-        user.payout.mindshare = 0.5 * XUSD + 0.5 * EDS
-        base_score = user.payout.mindshare * period_reward
-        user.payout.base_score = base_score
-        score = base_score
-        # Если есть юзер у этого соц аккаунта, то нужно учитывать мультипликаторы и считать доп информацию
-        app_user = await crud.get_user_by_social_account_id(db, social_account_id)
-        if app_user:
-            # подсчитываем мультипликаторы
-            # получаем последний Payout для этого юзера
-            last_payout = await crud.get_last_payout_by_social_account_id(db, social_account_id, project.id)
-            if not last_payout:
-                # если еще небыло выплат по этому проекту для юзера, значит это первый пост
-                # TODO: не уверен, что нужно устанавливать именно это время
-                user.payout.first_post_at = NOW_TS
-                user.payout.last_post_at = NOW_TS
-                user.payout.weekly_streak_start_at = NOW_TS
-                user.payout.loyalty_points = 0
-                user.payout.min_loyalty = 0
-            else:
-                # сохраняем прошлые значения
-                user.payout.first_post_at = last_payout.first_post_at if last_payout.first_post_at is not None else NOW_TS
-                user.payout.last_post_at = last_payout.last_post_at if last_payout.last_post_at is not None else NOW_TS
-                user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at if last_payout.weekly_streak_start_at is not None else NOW_TS
-                user.payout.loyalty_points = last_payout.loyalty_points if last_payout.loyalty_points is not None else 0
-                user.payout.min_loyalty = last_payout.min_loyalty if last_payout.min_loyalty is not None else 0
-        
-            ### рассчитываем бонусы
-            ## бонус за первую неделю
-            # рассчитываем бонус за первую неделю
-            week_period = NOW_TS - 60*60*24*7
-            if user.payout.first_post_at >= week_period:
-                score += base_score*9
+        # 6. Для каждого автора считаем XUSD, EDS, mindshare, base_score, score
+        total_mindshare = 0
+        total_base_score = 0
+        total_score = 0
+        for social_account_id, user in user_stats.items():
+            XUSD = user.xscore / sum_xscore
+            EDS = user.payout.engagement / sum_engagement
+            user.payout.mindshare = 0.5 * XUSD + 0.5 * EDS
+            base_score = user.payout.mindshare * period_reward
+            user.payout.base_score = base_score
+            score = base_score
+            # Если есть юзер у этого соц аккаунта, то нужно учитывать мультипликаторы и считать доп информацию
+            app_user = await crud.get_user_by_social_account_id(db, social_account_id)
+            if app_user:
+                # подсчитываем мультипликаторы
+                # получаем последний Payout для этого юзера
+                last_payout = await crud.get_last_payout_by_social_account_id(db, social_account_id, project.id)
+                if not last_payout:
+                    # если еще небыло выплат по этому проекту для юзера, значит это первый пост
+                    # TODO: не уверен, что нужно устанавливать именно это время
+                    user.payout.first_post_at = NOW_TS
+                    user.payout.last_post_at = NOW_TS
+                    user.payout.weekly_streak_start_at = NOW_TS
+                    user.payout.loyalty_points = 0
+                    user.payout.min_loyalty = 0
+                else:
+                    # сохраняем прошлые значения
+                    user.payout.first_post_at = last_payout.first_post_at if last_payout.first_post_at is not None else NOW_TS
+                    user.payout.last_post_at = last_payout.last_post_at if last_payout.last_post_at is not None else NOW_TS
+                    user.payout.weekly_streak_start_at = last_payout.weekly_streak_start_at if last_payout.weekly_streak_start_at is not None else NOW_TS
+                    user.payout.loyalty_points = last_payout.loyalty_points if last_payout.loyalty_points is not None else 0
+                    user.payout.min_loyalty = last_payout.min_loyalty if last_payout.min_loyalty is not None else 0
+            
+                ### рассчитываем бонусы
+                ## бонус за первую неделю
+                # рассчитываем бонус за первую неделю
+                week_period = 60*60*24*7
+                if user.payout.first_post_at >= NOW_TS - week_period:
+                    score += base_score*9
 
-            ## бонус за стрик
-            # сбрасываем стрик, если не было упоминания об проекте за неделю
-            if user.payout.last_post_at < week_period:
-                user.payout.weekly_streak_start_at = NOW_TS   
-            else:
+                ## бонус за стрик
+                # сбрасываем стрик, если не было упоминания об проекте за неделю
+                if user.payout.last_post_at < NOW_TS - week_period:
+                    user.payout.weekly_streak_start_at = NOW_TS
+                
                 # считаем длину стрика
                 weeks_since_streak_start = (NOW_TS - user.payout.weekly_streak_start_at) // week_period
-                weeks_to_multiplier = {
-                    0: 0,
-                    1: 0.25,
-                    2: 0.5,
+                multiplier = utils_base.streak_to_multiplier(weeks_since_streak_start)
+                score += (base_score*multiplier) - base_score
+
+                ## бонус за лояльность
+                # снимаем очки лояльности за каждую целую неделю некативности.
+                week_penalty = 0.1
+                penalty_multiplier = 1-week_penalty
+                weeks_since_last_post = (NOW_TS - user.payout.last_post_at) // week_period
+                user.payout.loyalty_points = max(
+                    user.payout.min_loyalty, 
+                    user.payout.loyalty_points*(penalty_multiplier**weeks_since_last_post)
+                )
+                # а затем добавляем loyalty_points на основе mindshare
+                mindshare_to_loyalty_points = {
+                    0: 0.75,
+                    0.5: 1,
+                    2: 1.5,
+                    5: 2,
+                    10: 4,
+                    12.5: 4.5,
+                    15: 5,
+                    17.5: 5.5,
+                    20: 6
                 }
-                multiplier = weeks_to_multiplier.get(weeks_since_streak_start, 0.5)
-                score += base_score*multiplier
-
-            ## бонус за лояльность
-            # снимаем очки лояльности за каждую целую неделю некативности.
-            week_penalty = 0.1
-            penalty_multiplier = 1-week_penalty
-            weeks_since_last_post = (NOW_TS - user.payout.last_post_at) // week_period
-            user.payout.loyalty_points = max(
-                user.payout.min_loyalty, 
-                user.payout.loyalty_points*(penalty_multiplier**weeks_since_last_post)
-            )
-            # а затем добавляем loyalty_points на основе mindshare
-            mindshare_to_loyalty_points = {
-                0: 0.75,
-                0.5: 1,
-                2: 1.5,
-                5: 2,
-                10: 4,
-                12.5: 4.5,
-                15: 5,
-                17.5: 5.5,
-                20: 6
-            }
-            max_loyalty_points = 100
-            max_available_points = 0
-            for mindshare, points in mindshare_to_loyalty_points.items():
-                if user.payout.mindshare >= mindshare:
-                    max_available_points = max(max_available_points, points)
-            # плюсуем так, чтобы не превысить max_loyalty_points
-            points_to_add = max_available_points*(period_seconds / 86400)
-            user.payout.loyalty_points = min(
-                user.payout.loyalty_points+points_to_add,
-                max_loyalty_points
-            )
-            # начисляем бонус за лояльность
-            loyalty_to_bonus = {
-                10: 1.125,
-                20: 1.25,
-                30: 1.35,
-                40: 1.5,
-                50: 1.75,
-                60: 2,
-                70: 2.25,
-                80: 2.5,
-                90: 2.75,
-                100: 3
-            }
-            bonus_multiplier = 1
-            for loyalty, multiplier in loyalty_to_bonus.items():
-                if user.payout.loyalty_points >= loyalty:
-                    bonus_multiplier = max(bonus_multiplier, multiplier)
-            score += base_score*bonus_multiplier - base_score
-            
-            
-            # при необходимости обновляем min_loyalty
-            if user.payout.loyalty_points == 100:
-                user.payout.min_loyalty = 50
-            elif user.payout.loyalty_points >= 80:
-                user.payout.min_loyalty = max(user.payout.min_loyalty, 40)
-            elif user.payout.loyalty_points >= 50:
-                user.payout.min_loyalty = max(user.payout.min_loyalty, 30)
-
-            # обновляем дату последнего поста, если были новые посты за этот период
-            if user.payout.new_posts_count > 0:
-                user.payout.last_post_at = NOW_TS
+                max_loyalty_points = 100
+                max_available_points = 0
+                for mindshare, points in mindshare_to_loyalty_points.items():
+                    if user.payout.mindshare >= mindshare:
+                        max_available_points = max(max_available_points, points)
+                # плюсуем так, чтобы не превысить max_loyalty_points
+                points_to_add = max_available_points*(period_seconds / 86400)
+                user.payout.loyalty_points = min(
+                    user.payout.loyalty_points+points_to_add,
+                    max_loyalty_points
+                )
+                # начисляем бонус за лояльность
                 
-            logger.info(f"[Leaderboard] User {app_user.id} score: {score:.2f}, mindshare: {user.payout.mindshare:.4f}, base_score: {user.payout.base_score:.2f}, engagement: {user.payout.engagement:.2f}, new_posts_count: {user.payout.new_posts_count}, first_post_at: {user.payout.first_post_at}, last_post_at: {user.payout.last_post_at}, weekly_streak_start_at: {user.payout.weekly_streak_start_at}, loyalty_points: {user.payout.loyalty_points}, min_loyalty: {user.payout.min_loyalty}")
+                # если пользователь имеет подписку Ultra, то его лояльность увеличивается на 30 очков
+                # но только в момент начисления бонуса за лояльность
+                user_actual_loyalty = user.payout.loyalty_points
+                user_last_plan_check = crud.get_user_last_plan_check(db, app_user.id)
+                if user_last_plan_check:
+                    if user_last_plan_check.user_plan == enums.SubscriptionPlanType.ULTRA:
+                        user_actual_loyalty += 30
+                
+                loyalty_multiplier = utils_base.loyalty_to_multiplier(user_actual_loyalty)
+                score += base_score*loyalty_multiplier - base_score
+                
+                # при необходимости обновляем min_loyalty
+                if user.payout.loyalty_points == 100:
+                    user.payout.min_loyalty = 50
+                elif user.payout.loyalty_points >= 80:
+                    user.payout.min_loyalty = max(user.payout.min_loyalty, 40)
+                elif user.payout.loyalty_points >= 50:
+                    user.payout.min_loyalty = max(user.payout.min_loyalty, 30)
 
-        user.payout.score = score
-        
-        total_mindshare += user.payout.mindshare
-        total_base_score += user.payout.base_score
-        total_score += user.payout.score
+                # обновляем дату последнего поста, если были новые посты за этот период
+                if user.payout.new_posts_count > 0:
+                    user.payout.last_post_at = NOW_TS
+                    
+                logger.info(f"[Leaderboard] User {app_user.id} score: {score:.2f}, mindshare: {user.payout.mindshare:.4f}, base_score: {user.payout.base_score:.2f}, engagement: {user.payout.engagement:.2f}, new_posts_count: {user.payout.new_posts_count}, first_post_at: {user.payout.first_post_at}, last_post_at: {user.payout.last_post_at}, weekly_streak_start_at: {user.payout.weekly_streak_start_at}, loyalty_points: {user.payout.loyalty_points}, min_loyalty: {user.payout.min_loyalty}")
 
-    logger.info(f"[Leaderboard] Total mindshare: {total_mindshare:.4f}, total base_score: {total_base_score:.2f}, total score: {total_score:.2f}")
+            user.payout.score = score
+            
+            total_mindshare += user.payout.mindshare
+            total_base_score += user.payout.base_score
+            total_score += user.payout.score
+
+        logger.info(f"[Leaderboard] Total mindshare: {total_mindshare:.4f}, total base_score: {total_base_score:.2f}, total score: {total_score:.2f}")
+    else:
+        logger.warning(f"[Leaderboard] No user engagement for leaderboard update for project {project.id}")
 
     # 7. Сохраняем ScorePayout и ProjectLeaderboardHistory
     try:
@@ -1638,10 +1626,11 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         db.add(history)
         db.flush()  # чтобы получить history.id
 
-        for user in user_stats.values():
-            user.payout.project_leaderboard_history_id = history.id
-            user.payout.created_at = period_end
-            db.add(user.payout)
+        if sum_engagement > 0 and len(user_stats) > 0:
+            for user in user_stats.values():
+                user.payout.project_leaderboard_history_id = history.id
+                user.payout.created_at = period_end
+                db.add(user.payout)
         db.commit()
         logger.info(f"[Leaderboard] Leaderboard updated for project {project.id}: ...")
     except Exception as e:

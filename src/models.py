@@ -444,7 +444,7 @@ class ScorePayout(Base):
     mindshare = Column(Float, nullable=False) # mindshare, который использовался для расчета score
     base_score = Column(Float, nullable=False) # базовый рейтинг, на основе текущего mindshare
     
-    # TODO: добавить колонки для расчета бонусов
+    # колонки для расчета бонусов
     new_posts_count = Column(Integer, nullable=True, default=None, server_default=None)
     # дата первого поста об проекте лидерборда с момента привязки юзером 
     first_post_at = Column(Integer, nullable=True, default=None, server_default=None)
