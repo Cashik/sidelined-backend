@@ -318,27 +318,27 @@ async def generate_ai_response_asstream(prompt_service: PromptService) -> AsyncG
     else:
         raise NotImplementedError(f"Model \"{prompt_service.generate_data.chat_settings.model.value}\" provider unknown!")
 
-    api_key = ""
     import os
     if model_provider == "google_genai":
-        api_key = settings.GEMINI_API_KEY
-        os.environ["GOOGLE_API_KEY"] = api_key
+        os.environ["GOOGLE_API_KEY"] = settings.GEMINI_API_KEY
     elif model_provider == "openai":
-        api_key = settings.OPENAI_API_KEY
+        # Добавляем тулз для поиска в интернете
         tools.append({"type": "web_search_preview"})
-        os.environ["OPENAI_API_KEY"] = api_key
+        os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
     else:
         raise NotImplementedError(f"Provider \"{model_provider}\" do not turned on!")
 
     logger.info(f"[Generation]:{utils_base.now_timestamp() - start_ts} Using model: {model_provider}:{prompt_service.generate_data.chat_settings.model.value}")
 
-     # --- Создаём агента через LangGraph ---
+    model = f"{model_provider}:{prompt_service.generate_data.chat_settings.model.value}"
+
+    # --- Создаём агента через LangGraph ---
     agent = create_react_agent(
-        model=f"{model_provider}:{prompt_service.generate_data.chat_settings.model.value}",
+        model=model,
         tools=tools
         # prompt/prompt_template если хочешь переопределять, но в большинстве случаев дефолт ок!
     )
-
+    logger.info(f"[Generation]: Agent created: {agent}")
     #test_response = agent.invoke({"messages": [{"role": "user", "content": "What is the weather in Tokyo?"}]})
     #logger.info(f"Test response: {test_response}")
 
@@ -1891,14 +1891,13 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
     return []
     
 
-
-feed_cache = FeedCacheService()
-
 async def get_feed(project: models.Project, db: Session, force_rebuild: bool = False) -> List[schemas.Post]:
     """
     Получить топ-100 постов по engagement за сутки для проекта с кешированием.
     Если force_rebuild=True — всегда пересчитывает и обновляет кеш.
     """
+    feed_cache = FeedCacheService()
+    # если кеш не нужно пересчитывать, то возвращаем кешированные данные
     if not force_rebuild:
         cached = await feed_cache.get_feed(project.id)
         if cached is not None:

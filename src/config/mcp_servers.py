@@ -36,7 +36,7 @@ if settings.EVM_AGENT_KIT_SSE_URL:
     )
 
 prebuild_toolboxes = []
-if False:
+if True:
     wrapper = DuckDuckGoSearchAPIWrapper(max_results=6, source="news")
     news_search_api = DuckDuckGoSearchResults(api_wrapper=wrapper, output_format="json")          # уже BaseTool
     args_schema = {
@@ -55,8 +55,8 @@ if False:
     
     search_tool = StructuredTool.from_function(
         func=search_tool,
-        name="SEARCH_NEWS",
-        description="Search news in internet. Feel free to use it to provide the user with up-to-date information.",
+        name="BASIC_SEARCH",
+        description="Search news and basic snipets in internet. Feel free to use it to provide the user with up-to-date information. But do not use it if you have other search tools.",
         args_schema=args_schema
     )
 

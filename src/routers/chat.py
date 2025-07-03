@@ -191,6 +191,9 @@ async def stream_and_collect_messages(
                         except Exception as e:
                             logger.error(f"Не удалось распарсить output как JSON: {output} ({e})")
                             output = {"raw": output}
+                    if isinstance(output, list):
+                        output = {"results": output}
+                    
                     new_messages.append(schemas.ToolCallMessage(
                         sender=enums.Role.ASSISTANT,
                         recipient=enums.Role.USER,
