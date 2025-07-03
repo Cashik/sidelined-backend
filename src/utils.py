@@ -615,10 +615,25 @@ async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db
         if not hasattr(post, 'core') or not hasattr(post.core, 'user_results') or not hasattr(post.core.user_results, 'result'):
             logger.warning(f"Skipping tweet due to missing source data: {post}")
             return
+        
+        source_data: XApiService.User = post.core.user_results.result
+
+        # доп фильтрация
+        # если (like+comments+retweet)x3 < views , то пропускаем
+        if (main_post_data.favorite_count + main_post_data.reply_count + main_post_data.retweet_count) * 3 > views and views!=0:
+            logger.info(f"Skipping tweet due speculative engagement: {3*(main_post_data.favorite_count + main_post_data.reply_count + main_post_data.retweet_count)} > {views}")
+            return
+        # если текст меньше 30 символов, то пропускаем
+        if len(main_post_data.full_text) < 30:
+            logger.info(f"Skipping tweet due to short text: {main_post_data.full_text}")
+            return
+        # если в текте больше 5 упоминаний - пропускаем
+        if main_post_data.full_text.count("@") > 5:
+            logger.info(f"Skipping tweet due to many mentions: {main_post_data.full_text}")
+            return
 
         source_id = post.core.user_results.result.rest_id
         social_account_db: models.SocialAccount | None = await crud.get_social_account_by_id(source_id, db)
-        source_data: XApiService.User = post.core.user_results.result
         
         if not social_account_db:
             # создаем источник (аккаунт в твиттере)
