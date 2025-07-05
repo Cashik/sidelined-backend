@@ -22,7 +22,7 @@ from typing import Any, List
 from starlette.requests import Request
 from starlette_admin.auth import AuthProvider, AdminUser, AdminConfig, LoginFailed
 from starlette_admin.contrib.sqla import Admin as SAAdmin, ModelView
-from starlette_admin.fields import StringField, IntegerField, DateTimeField, BooleanField, JSONField, TextAreaField, HasOne, HasMany, EnumField, PasswordField
+from starlette_admin.fields import StringField, IntegerField, DateTimeField, BooleanField, JSONField, TextAreaField, HasOne, HasMany, EnumField, PasswordField, FloatField
 from starlette_admin.exceptions import FormValidationError
 from starlette.responses import Response
 
@@ -333,8 +333,8 @@ class SocialAccountAdmin(BaseProtectedView):
         BooleanField("is_disabled_for_leaderboard", label="Disable for Leaderboard", help_text="Enable this option to exclude the account from leaderboard and hide it from users."),
         HasMany("projects", label="Related Projects", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
-        StringField("twitter_scout_score", label="Twitter Score", read_only=True),
-        IntegerField("twitter_scout_score_updated_at", label="Twitter Score Updated At (timestamp)", read_only=True),
+        FloatField("twitter_scout_score", label="Twitter Score", required=False),
+        IntegerField("twitter_scout_score_updated_at", label="Twitter Score Updated At (timestamp)", required=False),
     ]
     
     # Fields excluded from create form - social_id will be auto-generated
