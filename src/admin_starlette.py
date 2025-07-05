@@ -171,6 +171,7 @@ class AdminOnlyView(BaseProtectedView):
 
 
 class AdminUserAdmin(AdminOnlyView):
+    page_size = 100
     searchable_fields = ["login"]
     sortable_fields = ["id", "login", "role", "created_at", "last_login_at"]
     
@@ -246,14 +247,15 @@ class AdminUserAdmin(AdminOnlyView):
 
 
 class UserAdmin(AdminOnlyView):
-    page_size = 50
-    searchable_fields = ["preferred_name"]
-    sortable_fields = ["id", "created_at", "preferred_name"]
+    page_size = 100
+    searchable_fields = ["preferred_name", "twitter_login"]
+    sortable_fields = ["id", "created_at", "preferred_name", "twitter_login"]
     exclude_fields_from_list = ["chat_settings", "user_context"]
     
     fields = [
         IntegerField("id", label="ID", read_only=True),
         StringField("preferred_name", label="Preferred Name", required=False, help_text="User's preferred name"),
+        StringField("twitter_login", label="Twitter Login", help_text="User's Twitter login"),
         TextAreaField("user_context", label="User Context", required=False, help_text="User context information"),
         IntegerField("used_credits_today", label="Credits Used Today", help_text="Credits used today"),
         BooleanField("pro_plan_promo_activated", label="Pro Plan Active", help_text="Is Pro plan promo activated"),
@@ -267,6 +269,7 @@ class UserAdmin(AdminOnlyView):
 
 
 class ProjectAdmin(BaseProtectedView):
+    page_size = 100
     searchable_fields = ["name", "description", "keywords"]
     sortable_fields = ["id", "name", "created_at"]
     exclude_fields_from_list = ["description", "keywords"]
@@ -317,9 +320,9 @@ class ProjectAdmin(BaseProtectedView):
 
 
 class SocialAccountAdmin(BaseProtectedView):
+    page_size = 100
     searchable_fields = ["social_login", "name"]
-    sortable_fields = ["id", "social_login", "created_at"]
-    page_size = 50
+    sortable_fields = ["id", "social_login", "created_at", "twitter_scout_score", "twitter_scout_score_updated_at"]
     
     # Fields for list and detail view
     fields = [
@@ -330,6 +333,8 @@ class SocialAccountAdmin(BaseProtectedView):
         BooleanField("is_disabled_for_leaderboard", label="Disable for Leaderboard", help_text="Enable this option to exclude the account from leaderboard and hide it from users."),
         HasMany("projects", label="Related Projects", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
+        StringField("twitter_scout_score", label="Twitter Score", read_only=True),
+        DateTimeField("twitter_scout_score_updated_at", label="Twitter Score Updated At", read_only=True),
     ]
     
     # Fields excluded from create form - social_id will be auto-generated
@@ -382,9 +387,9 @@ class SocialAccountAdmin(BaseProtectedView):
 
 
 class ProjectAccountStatusAdmin(BaseProtectedView):
+    page_size = 100
     searchable_fields = ["project.name", "account.social_login"]
     sortable_fields = ["id", "created_at", "type"]
-    page_size = 50
     
     fields = [
         IntegerField("id", label="ID", read_only=True),
@@ -418,9 +423,9 @@ class ProjectAccountStatusAdmin(BaseProtectedView):
 class ProjectLeaderboardHistoryAdmin(AdminOnlyView):
     label = "Leaderboard History"
     icon = "fa fa-trophy"
+    page_size = 100
     sortable_fields = ["id", "created_at", "start_ts", "end_ts", "project_id"]
     searchable_fields = ["id", "project_id"]
-    page_size = 50
     fields = [
         IntegerField("id", label="ID", read_only=True),
         IntegerField("project_id", label="Project ID", read_only=True),
@@ -436,9 +441,9 @@ class ProjectLeaderboardHistoryAdmin(AdminOnlyView):
 class ScorePayoutAdmin(AdminOnlyView):
     label = "Score Payouts"
     icon = "fa fa-coins"
-    sortable_fields = ["id", "created_at", "project_id", "social_account_id", "score"]
+    page_size = 100
+    sortable_fields = ["id", "created_at", "project_id", "social_account_id", "score", "loyalty_points"]
     searchable_fields = ["id", "project_id", "social_account_id"]
-    page_size = 50
     fields = [
         IntegerField("id", label="ID", read_only=True),
         IntegerField("project_id", label="Project ID", read_only=True),
@@ -449,6 +454,12 @@ class ScorePayoutAdmin(AdminOnlyView):
         IntegerField("mindshare", label="Mindshare", read_only=True),
         IntegerField("base_score", label="Base Score", read_only=True),
         IntegerField("score", label="Score", read_only=True),
+        IntegerField("new_posts_count", label="New Posts Count", read_only=True),
+        DateTimeField("first_post_at", label="First Post At", read_only=True),
+        DateTimeField("last_post_at", label="Last Post At", read_only=True),
+        DateTimeField("weekly_streak_start_at", label="Weekly Streak Start At", read_only=True),
+        StringField("loyalty_points", label="Loyalty Points", read_only=True),
+        IntegerField("min_loyalty", label="Min Loyalty", read_only=True),
     ]
     exclude_fields_from_create = ["id", "created_at"]
     exclude_fields_from_edit = ["id", "created_at"]
