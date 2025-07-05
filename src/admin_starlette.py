@@ -446,7 +446,7 @@ class ScorePayoutAdmin(AdminOnlyView):
     searchable_fields = ["id", "project_id", "social_account_id"]
     fields = [
         IntegerField("id", label="ID", read_only=True),
-        HasOne("social_account", label="Account", identity="social-account"),
+        IntegerField("social_account_id", label="Social Account ID", read_only=True),
         IntegerField("project_id", label="Project ID", read_only=True),
         IntegerField("project_leaderboard_history_id", label="Leaderboard History ID", read_only=True),
         IntegerField("created_at", label="Created At", read_only=True),
@@ -464,19 +464,6 @@ class ScorePayoutAdmin(AdminOnlyView):
     exclude_fields_from_create = ["id", "created_at"]
     exclude_fields_from_edit = ["id", "created_at"]
 
-    def get_list_query(self, request):
-        """Override to eagerly load relationships for list view"""
-        from sqlalchemy.orm import joinedload
-        return super().get_list_query(request).options(
-            joinedload(ScorePayout.social_account)
-        )
-    
-    def get_object_query(self, request):
-        """Override to eagerly load relationships for detail/edit views"""
-        from sqlalchemy.orm import joinedload
-        return super().get_object_query(request).options(
-            joinedload(ScorePayout.social_account)
-        )
 
 
 # ---------------------------------------------------------------------------
