@@ -182,7 +182,7 @@ class AdminUserAdmin(AdminOnlyView):
         PasswordField("new_password", label="New Password", required=False, help_text="Leave empty if you don't want to change password"),
         EnumField("role", label="Role", enum=enums.AdminRole, required=True, help_text="Administrator role"),
         IntegerField("created_at", label="Created At", read_only=True),
-        IntegerField("last_login_at", label="Last Login", read_only=True),
+        IntegerField("last_login_at", label="Last Login (timestamp)", read_only=True),
     ]
     
     # Исключаем password_hash из всех представлений (он не должен быть виден)
@@ -334,7 +334,7 @@ class SocialAccountAdmin(BaseProtectedView):
         HasMany("projects", label="Related Projects", identity="project-account-status"),
         IntegerField("created_at", label="Created At", read_only=True),
         StringField("twitter_scout_score", label="Twitter Score", read_only=True),
-        DateTimeField("twitter_scout_score_updated_at", label="Twitter Score Updated At", read_only=True),
+        IntegerField("twitter_scout_score_updated_at", label="Twitter Score Updated At (timestamp)", read_only=True),
     ]
     
     # Fields excluded from create form - social_id will be auto-generated
@@ -446,8 +446,8 @@ class ScorePayoutAdmin(AdminOnlyView):
     searchable_fields = ["id", "project_id", "social_account_id"]
     fields = [
         IntegerField("id", label="ID", read_only=True),
+        HasOne("social_account", label="Account", identity="social-account"),
         IntegerField("project_id", label="Project ID", read_only=True),
-        IntegerField("social_account_id", label="Account ID", read_only=True),
         IntegerField("project_leaderboard_history_id", label="Leaderboard History ID", read_only=True),
         IntegerField("created_at", label="Created At", read_only=True),
         IntegerField("engagement", label="Engagement", read_only=True),
@@ -455,14 +455,28 @@ class ScorePayoutAdmin(AdminOnlyView):
         IntegerField("base_score", label="Base Score", read_only=True),
         IntegerField("score", label="Score", read_only=True),
         IntegerField("new_posts_count", label="New Posts Count", read_only=True),
-        DateTimeField("first_post_at", label="First Post At", read_only=True),
-        DateTimeField("last_post_at", label="Last Post At", read_only=True),
-        DateTimeField("weekly_streak_start_at", label="Weekly Streak Start At", read_only=True),
+        IntegerField("first_post_at", label="First Post At (timestamp)", read_only=True),
+        IntegerField("last_post_at", label="Last Post At (timestamp)", read_only=True),
+        IntegerField("weekly_streak_start_at", label="Weekly Streak Start At (timestamp)", read_only=True),
         StringField("loyalty_points", label="Loyalty Points", read_only=True),
         IntegerField("min_loyalty", label="Min Loyalty", read_only=True),
     ]
     exclude_fields_from_create = ["id", "created_at"]
     exclude_fields_from_edit = ["id", "created_at"]
+
+    def get_list_query(self, request):
+        """Override to eagerly load relationships for list view"""
+        from sqlalchemy.orm import joinedload
+        return super().get_list_query(request).options(
+            joinedload(ScorePayout.social_account)
+        )
+    
+    def get_object_query(self, request):
+        """Override to eagerly load relationships for detail/edit views"""
+        from sqlalchemy.orm import joinedload
+        return super().get_object_query(request).options(
+            joinedload(ScorePayout.social_account)
+        )
 
 
 # ---------------------------------------------------------------------------
