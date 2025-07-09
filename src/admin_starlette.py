@@ -161,6 +161,25 @@ class AdminOnlyView(BaseProtectedView):
         return _has_full_access(request)
 
 
+class AdminWriteModeratorReadView(BaseProtectedView):
+    """
+    Base view for models that are read-only for MODERATOR
+    and fully accessible for ADMIN.
+    """
+
+    # is_accessible and is_visible are fine from BaseProtectedView
+    # (visible to both roles)
+
+    def can_create(self, request: Request) -> bool:  # type: ignore[override]
+        return _has_full_access(request)
+
+    def can_edit(self, request: Request) -> bool:  # type: ignore[override]
+        return _has_full_access(request)
+
+    def can_delete(self, request: Request) -> bool:  # type: ignore[override]
+        return _has_full_access(request)
+
+
 # ---------------------------------------------------------------------------
 # Concrete model views
 # ---------------------------------------------------------------------------
@@ -246,7 +265,7 @@ class AdminUserAdmin(AdminOnlyView):
         logger.info(f"Редактирование администратора: {obj.login}")
 
 
-class UserAdmin(AdminOnlyView):
+class UserAdmin(AdminWriteModeratorReadView):
     page_size = 100
     searchable_fields = ["preferred_name", "twitter_login"]
     sortable_fields = ["id", "created_at", "preferred_name", "twitter_login"]
@@ -420,7 +439,7 @@ class ProjectAccountStatusAdmin(BaseProtectedView):
         )
 
 
-class ProjectLeaderboardHistoryAdmin(AdminOnlyView):
+class ProjectLeaderboardHistoryAdmin(AdminWriteModeratorReadView):
     label = "Leaderboard History"
     icon = "fa fa-trophy"
     page_size = 100
@@ -438,7 +457,7 @@ class ProjectLeaderboardHistoryAdmin(AdminOnlyView):
     exclude_fields_from_edit = ["id", "created_at", "scores"]
 
 
-class ScorePayoutAdmin(AdminOnlyView):
+class ScorePayoutAdmin(AdminWriteModeratorReadView):
     label = "Score Payouts"
     icon = "fa fa-coins"
     page_size = 100
@@ -450,16 +469,16 @@ class ScorePayoutAdmin(AdminOnlyView):
         IntegerField("project_id", label="Project ID", read_only=True),
         IntegerField("project_leaderboard_history_id", label="Leaderboard History ID", read_only=True),
         IntegerField("created_at", label="Created At", read_only=True),
-        IntegerField("engagement", label="Engagement", read_only=True),
-        IntegerField("mindshare", label="Mindshare", read_only=True),
-        IntegerField("base_score", label="Base Score", read_only=True),
-        IntegerField("score", label="Score", read_only=True),
+        FloatField("engagement", label="Engagement", read_only=True),
+        FloatField("mindshare", label="Mindshare", read_only=True),
+        FloatField("base_score", label="Base Score", read_only=True),
+        FloatField("score", label="Score", read_only=True),
         IntegerField("new_posts_count", label="New Posts Count", read_only=True),
         IntegerField("first_post_at", label="First Post At (timestamp)", read_only=True),
         IntegerField("last_post_at", label="Last Post At (timestamp)", read_only=True),
         IntegerField("weekly_streak_start_at", label="Weekly Streak Start At (timestamp)", read_only=True),
-        StringField("loyalty_points", label="Loyalty Points", read_only=True),
-        IntegerField("min_loyalty", label="Min Loyalty", read_only=True),
+        FloatField("loyalty_points", label="Loyalty Points", read_only=True),
+        FloatField("min_loyalty", label="Min Loyalty", read_only=True),
     ]
     exclude_fields_from_create = ["id", "created_at"]
     exclude_fields_from_edit = ["id", "created_at"]
