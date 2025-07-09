@@ -1755,6 +1755,58 @@ def update_users_xscore(db: Session):
     logger.info(f"[XScore update] Updated {len(social_accounts)} social accounts")
 
 
+def update_users_xscore_with_linked_accounts(db: Session):
+    """
+    Обновляет xscore для всех социальных аккаунтов, чьи логины совпадают с установленными логинами пользователей.
+    Score устанавливается только если он не был установлен ранее.
+    """
+    # 1. Извлечь все уникальные twitter_login из пользователей
+    logins_tuples = db.query(models.User.twitter_login).filter(models.User.twitter_login.isnot(None)).distinct().all()
+    logins = [login for (login,) in logins_tuples]
+
+    if not logins:
+        logger.info("[XScore update linked] No users with linked twitter accounts found.")
+        return
+
+    logger.info(f"[XScore update linked] Found {len(logins)} unique linked twitter accounts to check.")
+    updated_count = 0
+
+    # 2. Для каждого логина найти соответствующий social_account и обновить его
+    for login in logins:
+        social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == login).first()
+
+        if social_account:
+            # Пропускаем, если скор обновлялся меньше месяца назад
+            one_month_ago_ts = now_timestamp() - (30 * 24 * 60 * 60)
+            if social_account.twitter_scout_score_updated_at and social_account.twitter_scout_score_updated_at > one_month_ago_ts:
+                continue
+
+            try:
+                user_xscore = get_social_account_xscore(social_account)
+                if user_xscore is not None:
+                    social_account.twitter_scout_score = user_xscore
+                    social_account.twitter_scout_score_updated_at = now_timestamp()
+                    db.add(social_account)
+                    updated_count += 1
+                    logger.info(f"[XScore update linked] Set xscore for social account {social_account.id} ({social_account.social_login}): {user_xscore}")
+                else:
+                    logger.warning(f"[XScore update linked] Could not get xscore for {login}")
+            except Exception as e:
+                logger.error(f"[XScore update linked] Error updating xscore for social account with login {login}: {e}")
+        else:
+            logger.warning(f"[XScore update linked] Social account not found for login {login}")
+
+    if updated_count > 0:
+        try:
+            db.commit()
+            logger.info(f"[XScore update linked] Committed updates for {updated_count} social accounts.")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[XScore update linked] Error committing updates: {e}")
+
+    logger.info(f"[XScore update linked] Finished. Updated {updated_count} social accounts.")
+
+
 def get_social_account_xscore(social_account: models.SocialAccount) -> float:
     """
     Получает xscore для пользователя.

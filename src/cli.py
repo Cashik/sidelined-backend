@@ -263,7 +263,7 @@ def update_users_xscore():
     session = SessionLocal()
     try:
         print("Запуск обновления xscore пользователей...")
-        utils.update_users_xscore(session)
+        utils.update_users_xscore_with_linked_accounts(session)
         print("Обновление xscore пользователей завершено.")
     finally:
         session.close()
