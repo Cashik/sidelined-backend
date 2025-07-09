@@ -443,6 +443,7 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
         # Проверяем каждый адрес кошелька пользователя
         for wallet in user.wallet_addresses:
             user_address = wallet.address
+            logger.info(f"Checking wallet {user_address} for plan {plan.id} chain_family={wallet.chain_family}")
             if wallet.chain_family == enums.ChainFamily.SOLANA:
                 #TODO: проверка токенов для solana
                 logger.warn(f"Skip token validation for solana user_address={user_address} wallet_id={wallet.id}")
