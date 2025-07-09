@@ -286,7 +286,7 @@ async def create_message_stream(
     if create_message_request.model:
         # проверяем, что модель доступна для пользователя
         if create_message_request.model not in available_models:
-            raise exceptions.APIError(code="message_generation_failed", message="Model not available for your subscription plan.", status_code=403)
+            raise exceptions.APIError(code="unavailable_model", message="Model not available for your subscription plan.", status_code=403)
     
     # Проверяем, что у пользователь не использовал все кредиты
     if user.used_credits_today >= user_subscription.max_credits:
