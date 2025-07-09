@@ -448,6 +448,7 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
                 #TODO: проверка токенов для solana
                 logger.warn(f"Skip token validation for solana user_address={user_address} wallet_id={wallet.id}")
             elif wallet.chain_family == enums.ChainFamily.EVM:
+                logger.info(f"Checking EVM wallet {user_address} for plan {plan.id}")
                 # проверяем erc721 токены
                 if erc721_requirements:
                     try:
@@ -457,6 +458,7 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
                             if natural_balance >= req.balance:
                                 logger.info(f"User {user_address} has enough ERC721 balance for {plan.id} subscription")
                                 return plan.id
+                            logger.info(f"User {user_address} has no enough ERC721 balance for {plan.id} subscription, required: {req.balance}, actual: {natural_balance}")
                     except exceptions.Web3ServiceError as e:
                         logger.error(f"Error checking ERC721 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
                         pass
@@ -469,6 +471,7 @@ async def check_user_access(user: models.User) -> enums.SubscriptionPlanType:
                             if natural_balance >= req.balance:
                                 logger.info(f"User {user_address} has enough ERC20{req.token.name} balance({natural_balance}) for {plan.id} subscription")
                                 return plan.id
+                            logger.info(f"User {user_address} has no enough ERC20{req.token.name} balance({natural_balance}) for {plan.id} subscription, required: {req.balance}, actual: {natural_balance}")
                     except exceptions.Web3ServiceError as e:
                         logger.error(f"Error checking ERC20 balance for token {req.token.address} on chain {req.token.chain_id}: {e}")
                         pass
