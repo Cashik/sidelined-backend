@@ -45,6 +45,9 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
         chain_family=chain_family
     )
     
+    # Сбрасываем кредиты если нужно
+    await crud.refresh_user_credits(db, user)
+    
     # Проверяем подписку
     subscription_check: enums.SubscriptionPlanType = await utils.check_user_subscription(user, db)
     
