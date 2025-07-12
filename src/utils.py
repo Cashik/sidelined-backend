@@ -21,6 +21,7 @@ from src import schemas, enums, models, exceptions, crud, utils_base
 from src.config.settings import settings
 from src.config.subscription_plans import subscription_plans
 from src.config.ai_models import all_ai_models as ai_models
+from src.config import aura
 from src.services.web3_service import Web3Service
 from src.services.prompt_service import PromptService
 from src.services import cache_service
@@ -1983,4 +1984,28 @@ async def get_feed(project: models.Project, db: Session, force_rebuild: bool = F
     posts_data = [p.model_dump() if hasattr(p, 'model_dump') else p.dict() for p in posts_schemas]
     await feed_cache.set_feed(project.id, posts_data)
     return posts_schemas
+
+
+async def ask_ai_to_calculate_posts_aura_score(posts: List[models.SocialPost]) -> List[aura.PostAuraScore]:
+    """
+    Рассчитывает Aura score для поста.
+    """
+    pass
+
+async def calculate_posts_aura_score(posts: List[models.SocialPost]) -> List[aura.PostAuraScore]:
+    """
+    Рассчитывает Aura score для списка постов.
+    """
+    scores = await ask_ai_to_calculate_posts_aura_score(posts)
     
+    for score in scores:
+        post = next((p for p in posts if p.id == score.post_id), None)
+        if post is None:
+            logger.error(f"[Aura] Post {score.post_id} not found")
+            continue
+        
+        post.aura_score = score.scores
+    return posts
+
+
+
