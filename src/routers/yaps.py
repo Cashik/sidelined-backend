@@ -218,9 +218,12 @@ async def get_leaderboard(
         return LeaderboardResponse(users=[])
 
     users = await utils.get_leaderboard(project, period, db)
+    users_schemas = [schemas.LeaderboardUser(**user) for user in users]
+    # sort by score
+    users_schemas.sort(key=lambda u: u.scores, reverse=True)
     logger.info(f"[Leaderboard] Found {len(users)} users for project {project.name}, period {period}")
     # 3. Собираем leaderboard
-    return LeaderboardResponse(users=users)
+    return LeaderboardResponse(users=users_schemas)
 
 # --- X (Twitter) OAuth ---
 
