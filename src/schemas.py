@@ -537,3 +537,12 @@ class LeaderboardUser(BaseModel):
     posts_all_time: int
     is_connected: bool = False
 
+
+class PostForAura(BaseModel):
+    id: int
+    text: str
+
+
+class BrainRequest(BaseModel):
+    post_text: str
+

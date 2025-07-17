@@ -6,11 +6,13 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session, aliased
 import requests
 import json
+from collections import defaultdict
 
 from src.database import SessionLocal
 from src.models import User, Project, AdminUser
 from src import crud, utils_base, enums, models, utils
 from src.config.projects import projects_all
+from src.exceptions import PostTextExtractionError
 
 from src.config.settings import settings
 
@@ -443,6 +445,145 @@ def get_arbus_score(handle: str, api_key: str):
         print(f"Ошибка при запросе к Arbus API: {e}")
 
 
+def calculate_aura_for_top_posts():
+    """
+    Выбирает топ 5 постов за последний день для всех проектов с лидербордом,
+    отправляет их на оценку в AI (Aura) и выводит результат.
+    """
+    session = SessionLocal()
+    from src.services import aura_service
+    from src import schemas
+    from src.config import aura
+    from typing import List
+
+    NUMBER_OF_RUNS = 2
+
+    try:
+        print("Поиск проектов с лидербордом...")
+        leaderboard_projects = session.query(models.Project).filter(models.Project.is_leaderboard_project == True).all()
+
+        if not leaderboard_projects:
+            print("Проекты с включенным лидербордом не найдены.")
+            return
+
+        print(f"Найдено {len(leaderboard_projects)} проектов. Сбор топ-5 постов для каждого...")
+
+        all_posts_for_aura: List[schemas.PostForAura] = []
+        temp_id_to_details_map = {}
+        temp_id_counter = 1
+
+        for project in leaderboard_projects:
+            print(f"  - Проект: {project.name}")
+            top_posts = crud.get_top_engagement_posts(project, session, limit=5, period=86400)
+            if not top_posts:
+                print(f"    -> Посты за последний день не найдены.")
+                continue
+            
+            print(f"    -> Найдено {len(top_posts)} постов.")
+            for post in top_posts:
+                try:
+                    full_text = utils_base.extract_full_post_text(post.raw_data, post.text)
+                    
+                    temp_id = temp_id_counter
+                    all_posts_for_aura.append(schemas.PostForAura(id=temp_id, text=full_text))
+                    
+                    temp_id_to_details_map[temp_id] = {
+                        'real_id': post.id,
+                        'text': full_text,
+                        'project_name': project.name
+                    }
+                    temp_id_counter += 1
+                except PostTextExtractionError as e:
+                    print(f"    -> [ПРЕДУПРЕЖДЕНИЕ] Не удалось извлечь текст для поста ID {post.id}. Ошибка: {e}")
+                    continue
+        
+        if not all_posts_for_aura:
+            print("Не найдено постов для анализа.")
+            return
+
+        print(f"\nВсего собрано {len(all_posts_for_aura)} постов. Запуск {NUMBER_OF_RUNS} раундов оценки для проверки стабильности...")
+        
+        all_runs_results = []
+        for i in range(NUMBER_OF_RUNS):
+            print(f"  - Запуск раунда {i+1}/{NUMBER_OF_RUNS}...")
+            try:
+                aura_results = asyncio.run(aura_service.ask_ai_to_calculate_posts_aura_score(all_posts_for_aura))
+                if aura_results and aura_results.posts_scores:
+                    all_runs_results.append(aura_results.posts_scores)
+                else:
+                    print(f"    -> [ПРЕДУПРЕЖДЕНИЕ] Раунд {i+1} не вернул оценок.")
+            except Exception as e:
+                 print(f"    -> [ОШИБКА] Раунд {i+1} не удался: {e}")
+
+        if not all_runs_results:
+            print("Не удалось получить оценки ни в одном из раундов. Прерывание.")
+            return
+
+        print("Все раунды завершены. Агрегация и расчет результатов...")
+
+        aggregated_scores = defaultdict(lambda: defaultdict(list))
+        for run_result in all_runs_results:
+            for score_item in run_result:
+                temp_id = score_item.post_id
+                for criterion_id, score_value in score_item.scores.model_dump().items():
+                    aggregated_scores[temp_id][criterion_id].append(score_value)
+
+        scores_by_project = defaultdict(list)
+        for temp_id in aggregated_scores:
+             if temp_id not in temp_id_to_details_map:
+                continue
+             project_name = temp_id_to_details_map[temp_id]['project_name']
+             scores_by_project[project_name].append(temp_id)
+
+        for project_name, temp_ids in scores_by_project.items():
+            print("\n" + "="*80)
+            print(f"Проект: {project_name}")
+            print("="*80)
+
+            for temp_id in temp_ids:
+                post_details = temp_id_to_details_map.get(temp_id)
+                if not post_details:
+                    continue
+
+                real_post_id = post_details['real_id']
+                post_text = post_details['text']
+                
+                print(f"\n--- Пост (Локальный ID: {temp_id}, DB ID: {real_post_id}) ---")
+                print(f"Текст: {post_text}")
+                print("\nОценки Aura (анализ стабильности):")
+                
+                total_aura_points = 0.0
+                post_criteria_scores = aggregated_scores[temp_id]
+
+                for criterion_info in aura.criteria_list:
+                    criterion_id = criterion_info['id']
+                    
+                    if criterion_id not in post_criteria_scores:
+                        continue
+
+                    scores_list = post_criteria_scores[criterion_id]
+                    average_score = sum(scores_list) / len(scores_list) if scores_list else 0
+                    
+                    criterion_name = criterion_info['categoria']
+                    max_points = criterion_info['max_points']
+                    
+                    aura_points = (average_score / 10.0) * max_points
+                    total_aura_points += aura_points
+                    
+                    scores_str = ", ".join(map(str, scores_list))
+                    
+                    print(f"  - {criterion_name} ({criterion_id}):")
+                    print(f"    - Оценки: [{scores_str}] (среднее: {average_score:.2f}/10)")
+                    print(f"    - Итоговые очки: {aura_points:.2f}/{max_points} Aura")
+
+                total_max_aura_points = sum(c['max_points'] for c in aura.criteria_list)
+                print(f"\n  Суммарная оценка Aura (на основе среднего): {total_aura_points:.2f}/{total_max_aura_points} Aura")
+                print("-"*(len(str(real_post_id)) + 30))
+
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -509,6 +650,9 @@ def main():
     arbus_score_parser = subparsers.add_parser('get-arbus-score', help='Получить Arbus AI influence score для Twitter-аккаунта')
     arbus_score_parser.add_argument('--handle', '-l', required=True, help='Twitter handle (ник без @)')
 
+    # Команда оценки постов через Aura
+    aura_score_parser = subparsers.add_parser('calculate-aura', help='Оценить топ-5 постов для проектов с лидербордом')
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -543,6 +687,8 @@ def main():
         refresh_leaderboard_cache()
     elif args.command == 'get-arbus-score':
         get_arbus_score(args.handle, "AIzaSyDkiIG4QdLvYsSzlPMh238BwGZtQZQjop0")
+    elif args.command == 'calculate-aura':
+        calculate_aura_for_top_posts()
     else:
         parser.print_help()
 
@@ -565,6 +711,7 @@ python -m src.cli update-social-accounts-profile
 python -m src.cli check-duplicates --clean
 python -m src.cli refresh-leaderboard-cache
 python -m src.cli get-arbus-score -l "HANDLE"
+python -m src.cli calculate-aura
 """
 
 if __name__ == "__main__":

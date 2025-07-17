@@ -36,8 +36,8 @@ class Web3ServiceError(BusinessError):
         super().__init__(code="web3_service_error", message="Error while getting balances")
 
 class FactNotFoundError(BusinessError):
-    def __init__(self):
-        super().__init__(code="fact_not_found", message="Fact not found")
+    def __init__(self, message: str = "Fact not found", code: str = "fact_not_found"):
+        super().__init__(message=message, code=code)
 
 class MessageNotFoundError(BusinessError):
     def __init__(self):
@@ -64,8 +64,8 @@ class AddMessageError(BusinessError):
         super().__init__(code="add_message_error", message="Error while adding message to chat")
 
 class PromoCodeActivationError(BusinessError):
-    def __init__(self, message: str):
-        super().__init__(code="promo_code_activation_error", message=message)
+    def __init__(self, message: str, code: str = "promo_code_activation_failed"):
+        super().__init__(message=message, code=code)
 
 class PromoCodeNotFoundError(BusinessError):
     def __init__(self):
@@ -78,4 +78,8 @@ class AutoYapsError(BusinessError):
 class XAccountNotLinkedError(BusinessError):
     def __init__(self):
         super().__init__(code="x_account_not_linked", message="Your X account is not linked to your account.")
+
+class PostTextExtractionError(BusinessError):
+    def __init__(self, message: str = "Could not extract text from post JSON", code: str = "post_text_extraction_error"):
+        super().__init__(message=message, code=code)
 

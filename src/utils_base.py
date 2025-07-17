@@ -9,14 +9,59 @@ from datetime import datetime
 Тут должны быть только те утилиты, которые не связанны с бизнес логикой.
 """
 
-def now_timestamp():
+from src import enums
+from src.exceptions import PostTextExtractionError
+
+def now_timestamp() -> int:
     """Получение текущего timestamp в секундах"""
     return int(time.time())
 
 
 def format_promo_code(code: str) -> str:
     """Форматирование промо-кода"""
+    # только lowercase
     return code.strip().lower()
+
+
+def extract_full_post_text(post_json: dict, initial_text: str) -> str:
+    """
+    Извлекает полный текст поста из сложного JSON объекта, полученного от Twitter API.
+    Логика аналогична фронтенду.
+
+    Args:
+        post_json: Словарь с данными поста (поле full_post_json из модели).
+        initial_text: Текст поста из основного поля, используется как fallback.
+
+    Returns:
+        Полный текст поста.
+        
+    Raises:
+        PostTextExtractionError: Если не удалось извлечь текст.
+    """
+    if not isinstance(post_json, dict):
+        if initial_text:
+            return initial_text
+        raise PostTextExtractionError("Post JSON is not a dict and no initial text provided.")
+        
+    try:
+        # 1. Проверяем note_tweet для длинных постов
+        note_text = post_json.get('note_tweet', {}).get('note_tweet_results', {}).get('result', {}).get('text')
+        if note_text:
+            return note_text
+
+        # 2. Если нет, используем legacy.full_text
+        legacy_text = post_json.get('legacy', {}).get('full_text')
+        if legacy_text:
+            return legacy_text
+            
+        # 3. Если и этого нет, используем основной текст
+        if initial_text:
+            return initial_text
+            
+        # 4. Если ничего не найдено, выбрасываем исключение
+        raise PostTextExtractionError("Could not find post text in 'note_tweet', 'legacy.full_text' or initial text field.")
+    except Exception as e:
+        raise PostTextExtractionError(f"An unexpected error occurred during text extraction: {e}")
 
 
 def parse_date_to_timestamp(date: str) -> int:
