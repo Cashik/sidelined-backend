@@ -1981,7 +1981,7 @@ async def get_feed(project: models.Project, db: Session, force_rebuild: bool = F
     posts = get_top_engagement_posts(project, db, limit=100, period=86400)
     posts_schemas = convert_posts_to_schemas(posts)
     # Сериализация
-    posts_data = [p.model_dump() if hasattr(p, 'model_dump') else p.dict() for p in posts_schemas]
+    posts_data = [p.model_dump(mode='json') for p in posts_schemas]
     await feed_cache.set_feed(project.id, posts_data)
     return posts_schemas
 
