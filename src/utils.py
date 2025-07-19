@@ -1852,6 +1852,14 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
         .all()
     )
     
+    if not histories:
+        logger.warning(f"[Leaderboard] No history found for project {project.name}. Returning empty list.")
+        # Если истории нет, мы не можем построить лидерборд.
+        # Кешируем пустой список для всех периодов, чтобы избежать повторных пересчетов.
+        for p in cache_service.LeaderboardPeriod:
+             await leaderboard_cache.set_leaderboard(project.id, p, [])
+        return []
+    
     # для начала, считаем общие данные за все время для каждого пользователя
     class AllTimeUserHistory:
         score: float = 0
@@ -2006,6 +2014,126 @@ async def calculate_posts_aura_score(posts: List[models.SocialPost]) -> List[aur
         
         post.aura_score = score.scores
     return posts
+
+async def create_leaderboard_excel(project_id: int, db: Session, output_path: str, period: cache_service.LeaderboardPeriod = cache_service.LeaderboardPeriod.ALL_TIME) -> bool:
+    """
+    Создает Excel-файл с лидербордом проекта для указанного периода
+    и добавляет вкладку со сводной статистикой.
+    
+    Returns:
+        bool: True если файл был создан успешно, False если нет данных для периода
+    """
+    import pandas as pd
+    import os
+
+    project = await crud.get_project_by_id(db, project_id)
+    if not project:
+        logger.error(f"[ExcelExport] Project with id {project_id} not found.")
+        return False
+
+    # 1. Получаем данные для выбранного периода и всегда пересчитываем
+    logger.info(f"[ExcelExport] Fetching leaderboard for period: {period.name}")
+    leaderboard_data = await get_leaderboard(project, period, db, force_rebuild=True)
+
+    if not leaderboard_data:
+        logger.warning(f"[ExcelExport] No data for period: {period.name}. Excel file will not be created.")
+        return False
+
+    logger.info(f"[ExcelExport] Got {len(leaderboard_data)} records for period: {period.name}")
+    
+    # Логируем структуру данных для отладки
+    if leaderboard_data:
+        logger.info(f"[ExcelExport] Sample record keys: {list(leaderboard_data[0].keys())}")
+        logger.info(f"[ExcelExport] Sample record: {leaderboard_data[0]}")
+
+    try:
+        df = pd.DataFrame(leaderboard_data)
+        logger.info(f"[ExcelExport] DataFrame created with shape: {df.shape}")
+        logger.info(f"[ExcelExport] DataFrame columns: {list(df.columns)}")
+    except Exception as e:
+        logger.error(f"[ExcelExport] Error creating DataFrame: {e}")
+        return False
+
+    # 2. Удаляем ненужные колонки (только если они существуют)
+    columns_to_drop = ['avatar_url', 'scores_all_time']
+    existing_columns_to_drop = [col for col in columns_to_drop if col in df.columns]
+    if existing_columns_to_drop:
+        df = df.drop(columns=existing_columns_to_drop)
+        logger.info(f"[ExcelExport] Dropped columns: {existing_columns_to_drop}")
+
+    # Преобразуем путь в абсолютный для надежности в Docker
+    abs_output_path = os.path.abspath(output_path)
+    logger.info(f"[ExcelExport] Saving to absolute path: {abs_output_path}")
+
+    # 3. Создаем Excel файл и добавляем лист с данными
+    try:
+        with pd.ExcelWriter(abs_output_path, engine='openpyxl') as writer:
+            sheet_name = period.name
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            logger.info(f"[ExcelExport] Added sheet for period: {period.name} with {len(df)} rows.")
+
+            # 4. Создаем и добавляем лист "Summary"
+            period_label = {
+                cache_service.LeaderboardPeriod.ALL_TIME: "All Time",
+                cache_service.LeaderboardPeriod.ONE_DAY: "Last 24 Hours",
+                cache_service.LeaderboardPeriod.ONE_WEEK: "Last Week", 
+                cache_service.LeaderboardPeriod.ONE_MONTH: "Last Month"
+            }.get(period, period.name)
+            
+            # Проверяем, что у нас есть нужные колонки для Summary
+            required_columns = ['name', 'is_connected', 'posts_period']  # Примерные названия колонок
+            available_columns = list(df.columns)
+            logger.info(f"[ExcelExport] Available columns for summary: {available_columns}")
+            
+            # Определяем колонки динамически на основе доступных данных
+            name_col = None
+            connected_col = None
+            posts_col = None
+            
+            for col in available_columns:
+                if 'name' in col.lower():
+                    name_col = col
+                elif 'connected' in col.lower():
+                    connected_col = col
+                elif 'posts' in col.lower() and 'period' in col.lower():
+                    posts_col = col
+            
+            # Создаем Summary только если есть данные
+            if len(df) > 0 and name_col:
+                summary_metrics = [f'Total Unique Users ({period_label})']
+                summary_values = [f'=COUNTA({sheet_name}!{df.columns.get_loc(name_col)+1}2:{df.columns.get_loc(name_col)+1}{len(df)+1})']
+                
+                if connected_col:
+                    summary_metrics.append(f'Connected Users ({period_label})')
+                    summary_values.append(f'=COUNTIF({sheet_name}!{df.columns.get_loc(connected_col)+1}2:{df.columns.get_loc(connected_col)+1}{len(df)+1}, "True")')
+                
+                if posts_col:
+                    summary_metrics.extend([
+                        f'Total Mentions ({period_label})',
+                        f'Average Mentions per User ({period_label})',
+                        f'Median Mentions per User ({period_label})'
+                    ])
+                    col_letter = chr(65 + df.columns.get_loc(posts_col))  # Преобразуем в букву (A, B, C...)
+                    summary_values.extend([
+                        f'=SUM({sheet_name}!{col_letter}2:{col_letter}{len(df)+1})',
+                        f'=AVERAGE({sheet_name}!{col_letter}2:{col_letter}{len(df)+1})',
+                        f'=MEDIAN({sheet_name}!{col_letter}2:{col_letter}{len(df)+1})'
+                    ])
+                
+                summary_df = pd.DataFrame({
+                    'Metric': summary_metrics,
+                    'Value': summary_values
+                })
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                logger.info(f"[ExcelExport] Added Summary sheet for period: {period_label} with {len(summary_metrics)} metrics.")
+            else:
+                logger.warning(f"[ExcelExport] Skipping Summary sheet - insufficient data or missing columns")
+
+        logger.info(f"[ExcelExport] Leaderboard Excel file saved to {abs_output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"[ExcelExport] Failed to write Excel file to {abs_output_path}: {e}", exc_info=True)
+        return False
 
 
 

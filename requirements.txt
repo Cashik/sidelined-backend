@@ -33,3 +33,5 @@ bcrypt
 itsdangerous>=2.1.0
 starlette-admin[sqlalchemy]
 base58
+pandas
+openpyxl

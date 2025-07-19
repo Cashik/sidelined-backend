@@ -584,6 +584,21 @@ def calculate_aura_for_top_posts():
         session.close()
 
 
+def export_leaderboard(project_id: int, output_path: str):
+    """
+    Экспортировать лидерборд проекта в Excel-файл.
+    """
+    session = SessionLocal()
+    try:
+        print(f"Экспорт лидерборда для проекта с ID={project_id} в файл {output_path}...")
+        asyncio.run(utils.create_leaderboard_excel(project_id, session, output_path))
+        print("Экспорт успешно завершен.")
+    except Exception as e:
+        print(f"Ошибка при экспорте лидерборда: {e}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -653,6 +668,12 @@ def main():
     # Команда оценки постов через Aura
     aura_score_parser = subparsers.add_parser('calculate-aura', help='Оценить топ-5 постов для проектов с лидербордом')
 
+    # Команда экспорта лидерборда в Excel
+    export_leaderboard_parser = subparsers.add_parser('export-leaderboard', help='Экспортировать лидерборд проекта в Excel')
+    export_leaderboard_parser.add_argument('--project-id', '-p', type=int, required=True, help='ID проекта')
+    export_leaderboard_parser.add_argument('--output-path', '-o', type=str, required=True, help='Путь для сохранения Excel файла')
+
+
     args = parser.parse_args()
 
     if args.command == 'delete-all-users':
@@ -689,6 +710,8 @@ def main():
         get_arbus_score(args.handle, "AIzaSyDkiIG4QdLvYsSzlPMh238BwGZtQZQjop0")
     elif args.command == 'calculate-aura':
         calculate_aura_for_top_posts()
+    elif args.command == 'export-leaderboard':
+        export_leaderboard(args.project_id, args.output_path)
     else:
         parser.print_help()
 
@@ -712,6 +735,7 @@ python -m src.cli check-duplicates --clean
 python -m src.cli refresh-leaderboard-cache
 python -m src.cli get-arbus-score -l "HANDLE"
 python -m src.cli calculate-aura
+python -m src.cli export-leaderboard -p 1 -o leaderboard.xlsx
 """
 
 if __name__ == "__main__":

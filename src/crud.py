@@ -623,6 +623,14 @@ async def get_projects_all(db: Session) -> List[models.Project]:
     return db.execute(stmt).scalars().all()
 
 
+async def get_project_by_id(db: Session, project_id: int) -> Optional[models.Project]:
+    """
+    Получение проекта по его ID.
+    """
+    stmt = select(models.Project).where(models.Project.id == project_id)
+    return db.execute(stmt).scalar_one_or_none()
+
+
 async def get_projects_selected_by_user(user: models.User, db: Session) -> List[models.Project]:
     stmt = (
         select(models.Project)

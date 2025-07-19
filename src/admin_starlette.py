@@ -26,6 +26,12 @@ from starlette_admin.fields import StringField, IntegerField, DateTimeField, Boo
 from starlette_admin.exceptions import FormValidationError
 from starlette.responses import Response
 
+from starlette_admin import CustomView
+from starlette.responses import FileResponse
+from starlette.templating import Jinja2Templates
+import tempfile
+import os
+
 from sqlalchemy.orm import Session
 import bcrypt
 
@@ -484,6 +490,142 @@ class ScorePayoutAdmin(AdminWriteModeratorReadView):
     exclude_fields_from_edit = ["id", "created_at"]
 
 
+class ExportLeaderboardView(CustomView):
+    """Кастомная страница для экспорта лидерборда в Excel"""
+    
+    def is_accessible(self, request: Request) -> bool:
+        """Проверяем, что пользователь имеет права администратора"""
+        return _has_full_access(request)
+    
+    def is_visible(self, request: Request) -> bool:
+        """Показываем пункт меню только администраторам"""
+        return self.is_accessible(request)
+    
+    async def render(self, request: Request, templates: Jinja2Templates) -> Response:
+        if request.method == "POST":
+            form_data = await request.form()
+            project_id = form_data.get("project_id")
+            period_str = form_data.get("period", "ALL_TIME")
+            
+            if not project_id:
+                context = {
+                    "projects": await self._get_all_projects(request),
+                    "error": "Please select a project"
+                }
+                return templates.TemplateResponse(
+                    request=request, 
+                    name=self.template_path, 
+                    context=context
+                )
+            
+            try:
+                # Преобразуем строку периода в enum
+                from src.services import cache_service
+                period = cache_service.LeaderboardPeriod[period_str]
+                
+                # Генерируем Excel файл
+                db = SessionLocal()
+                try:
+                    from src import utils
+                    
+                    # Создаем временный файл
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
+                        tmp_path = tmp_file.name
+                    
+                    # Пытаемся создать Excel файл
+                    file_created = await utils.create_leaderboard_excel(int(project_id), db, tmp_path, period)
+                    
+                    # Проверяем, был ли файл создан успешно
+                    if not file_created:
+                        # Удаляем временный файл если он был создан
+                        import os
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        
+                        context = {
+                            "projects": await self._get_all_projects(request),
+                            "error": f"No leaderboard data available for period: {period_str}. Try selecting a different period."
+                        }
+                        return templates.TemplateResponse(
+                            request=request, 
+                            name=self.template_path, 
+                            context=context
+                        )
+                    
+                finally:
+                    db.close()
+                
+                # Возвращаем файл для скачивания
+                project = await self._get_project_by_id(request, int(project_id))
+                filename = f"leaderboard_{project.name if project else project_id}_{period_str.lower()}.xlsx"
+                
+                return FileResponse(
+                    path=tmp_path,
+                    filename=filename,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    background=lambda: self._cleanup_temp_file(tmp_path)
+                )
+                
+            except KeyError:
+                context = {
+                    "projects": await self._get_all_projects(request),
+                    "error": f"Invalid period selected: {period_str}"
+                }
+                return templates.TemplateResponse(
+                    request=request, 
+                    name=self.template_path, 
+                    context=context
+                )
+            except Exception as e:
+                context = {
+                    "projects": await self._get_all_projects(request),
+                    "error": f"Error exporting leaderboard: {str(e)}"
+                }
+                return templates.TemplateResponse(
+                    request=request, 
+                    name=self.template_path, 
+                    context=context
+                )
+        
+        # GET request - показываем форму
+        context = {
+            "projects": await self._get_all_projects(request)
+        }
+        return templates.TemplateResponse(
+            request=request, 
+            name=self.template_path, 
+            context=context
+        )
+    
+    async def _get_all_projects(self, request: Request):
+        """Получаем все проекты"""
+        db = SessionLocal()
+        try:
+            from src import crud
+            projects = await crud.get_projects_all(db)
+            return projects
+        finally:
+            db.close()
+    
+    async def _get_project_by_id(self, request: Request, project_id: int):
+        """Получаем проект по ID"""
+        db = SessionLocal()
+        try:
+            from src import crud
+            project = await crud.get_project_by_id(db, project_id)
+            return project
+        finally:
+            db.close()
+    
+    def _cleanup_temp_file(self, file_path: str):
+        """Удаляем временный файл после скачивания"""
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp file {file_path}: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -505,6 +647,13 @@ def setup_admin(app: Any) -> None:  # FastAPI/Starlette app
     admin.add_view(ProjectAccountStatusAdmin(ProjectAccountStatus, label="Project Account Status", icon="fa fa-link"))
     admin.add_view(ProjectLeaderboardHistoryAdmin(ProjectLeaderboardHistory, label="Leaderboard History", icon="fa fa-trophy"))
     admin.add_view(ScorePayoutAdmin(ScorePayout, label="Score Payouts", icon="fa fa-coins"))
+    admin.add_view(ExportLeaderboardView(
+        label="Export Leaderboard", 
+        icon="fa fa-download", 
+        path="/export-leaderboard",
+        template_path="export_leaderboard.html",
+        methods=["GET", "POST"]
+    ))
 
     # Finally mount to the app
     admin.mount_to(app)
