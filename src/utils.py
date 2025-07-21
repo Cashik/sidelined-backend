@@ -670,13 +670,15 @@ async def _update_post_data(post: x_api_service.TweetResult, project_id: int, db
         # Преобразуем строку даты в timestamp
         posted_at_timestamp = parse_date_to_timestamp(main_post_data.created_at)
         
+        raw_data = post.model_dump(mode="json")
+        post_text = utils_base.extract_full_post_text(raw_data, main_post_data.full_text)
         # создаем пост
         post_db = models.SocialPost(
             social_id=post_id,
             account_id=social_account_db.id,
-            text=main_post_data.full_text,
+            text=post_text,
             posted_at=posted_at_timestamp,
-            raw_data=post.model_dump(mode="json")
+            raw_data=raw_data
         )
         post_db = await crud.create_social_post(post_db, db)
 
@@ -1391,7 +1393,7 @@ def is_leaderboard_blacklisted(account: models.SocialAccount, db: Session) -> bo
     
     # если аккаунт записан как медиа какого-то из проектов
     for project in account.projects:
-        if project.status == enums.ProjectAccountStatus.MEDIA:
+        if project.type == enums.ProjectAccountStatusType.MEDIA:
             return True
     
     return False
@@ -2136,4 +2138,8 @@ async def create_leaderboard_excel(project_id: int, db: Session, output_path: st
         return False
 
 
-
+async def calculate_daily_aura_score(db: Session):
+    """
+    Рассчитывает Aura score для постов за сутки.
+    """
+    pass

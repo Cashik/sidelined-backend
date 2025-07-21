@@ -26,7 +26,6 @@ def format_promo_code(code: str) -> str:
 def extract_full_post_text(post_json: dict, initial_text: str) -> str:
     """
     Извлекает полный текст поста из сложного JSON объекта, полученного от Twitter API.
-    Логика аналогична фронтенду.
 
     Args:
         post_json: Словарь с данными поста (поле full_post_json из модели).
