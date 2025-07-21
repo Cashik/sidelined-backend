@@ -599,6 +599,100 @@ def export_leaderboard(project_id: int, output_path: str):
         session.close()
 
 
+def export_season_one_winners_csv():
+    """
+    Экспорт данных победителей первого сезона в формате CSV.
+    Выводит на консоль: login, is_connected, user_id, "list of addresses with tx counts"
+    """
+    from src.config.season_one_winners import winners
+    from src.services.web3_service import Web3Service
+    from src.config.settings import settings
+    from web3 import Web3
+    from eth_utils import to_checksum_address
+    
+    session = SessionLocal()
+    try:
+        # Парсим победителей из строки
+        winner_logins = [login.strip() for login in winners.strip().split('\n') if login.strip()]
+        
+        print("login,is_connected,user_id,addresses")
+        
+        # Инициализируем Web3Service для получения количества транзакций
+        web3_service = Web3Service(settings.ANKR_API_KEY)
+        
+        for login in winner_logins:
+            try:
+                # Ищем пользователя по twitter_login
+                user = session.execute(
+                    select(User).where(User.twitter_login == login)
+                ).scalar_one_or_none()
+                
+                # Ищем социальный аккаунт по social_login
+                social_account = session.execute(
+                    select(models.SocialAccount).where(models.SocialAccount.social_login == login)
+                ).scalar_one_or_none()
+                
+                # Определяем is_connected
+                is_connected = False
+                if social_account and social_account.twitter_scout_score_updated_at is not None:
+                    is_connected = True
+                
+                # Получаем user_id и адреса
+                user_id = user.id if user else ""
+                address_info_list = []
+                
+                if user and user.wallet_addresses:
+                    # Сортируем адреса по дате добавления (от старых к новым)
+                    sorted_wallets = sorted(user.wallet_addresses, key=lambda w: w.created_at)
+                    for wallet in sorted_wallets:
+                        tx_count = 0
+                        formatted_address = wallet.address
+                        
+                        try:
+                            if wallet.chain_family == enums.ChainFamily.EVM:
+                                # Для Ethereum используем checksum формат
+                                formatted_address = to_checksum_address(wallet.address)
+                                
+                                # Получаем количество транзакций для EVM адресов
+                                # Пробуем разные сети
+                                for chain_id in [enums.ChainID.ETHEREUM, enums.ChainID.BASE, enums.ChainID.ARBITRUM]:
+                                    try:
+                                        rpc_url = web3_service._get_rpc_http_url(chain_id)
+                                        w3 = Web3(Web3.HTTPProvider(rpc_url))
+                                        chain_tx_count = w3.eth.get_transaction_count(formatted_address)
+                                        tx_count = max(tx_count, chain_tx_count)  # Берем максимальное количество транзакций
+                                    except Exception as e:
+                                        logger.debug(f"Не удалось получить tx count для {formatted_address} на сети {chain_id}: {e}")
+                                        continue
+                            elif wallet.chain_family == enums.ChainFamily.SOLANA:
+                                # Для Solana оставляем адрес как есть
+                                formatted_address = wallet.address
+                                # Пропускаем получение транзакций для Solana (можно добавить позже если нужно)
+                                
+                        except Exception as e:
+                            logger.error(f"Ошибка при форматировании адреса {wallet.address}: {str(e)}")
+                            formatted_address = wallet.address
+                        
+                        # Формируем строку: address[tx_count]
+                        address_info = f"{formatted_address} [{tx_count}]"
+                        address_info_list.append(address_info)
+                
+                # Формируем строку с адресами
+                addresses_str = ",".join(address_info_list) if address_info_list else ""
+                
+                # Выводим в формате CSV без кавычек
+                print(f'{login},{str(is_connected).lower()},{user_id},{addresses_str}')
+                
+            except Exception as e:
+                logger.error(f"Ошибка при обработке логина {login}: {str(e)}")
+                # Выводим строку с ошибкой, но продолжаем обработку
+                print(f'{login},false,,')
+                continue
+        
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -673,6 +767,9 @@ def main():
     export_leaderboard_parser.add_argument('--project-id', '-p', type=int, required=True, help='ID проекта')
     export_leaderboard_parser.add_argument('--output-path', '-o', type=str, required=True, help='Путь для сохранения Excel файла')
 
+    # Команда экспорта победителей первого сезона в CSV
+    export_season_winners_parser = subparsers.add_parser('export-season-winners', help='Экспортировать данные победителей первого сезона в CSV')
+
 
     args = parser.parse_args()
 
@@ -712,6 +809,8 @@ def main():
         calculate_aura_for_top_posts()
     elif args.command == 'export-leaderboard':
         export_leaderboard(args.project_id, args.output_path)
+    elif args.command == 'export-season-winners':
+        export_season_one_winners_csv()
     else:
         parser.print_help()
 
@@ -736,6 +835,7 @@ python -m src.cli refresh-leaderboard-cache
 python -m src.cli get-arbus-score -l "HANDLE"
 python -m src.cli calculate-aura
 python -m src.cli export-leaderboard -p 1 -o leaderboard.xlsx
+python -m src.cli export-season-winners
 """
 
 if __name__ == "__main__":
