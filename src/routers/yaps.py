@@ -351,7 +351,7 @@ def _calc_mindshare(payouts, start_ts, end_ts) -> float:
         
     return user_mindshare
     
-@router.get("/leaderboard/personal")
+@router.get("/leaderboard/personal", response_model=PersonalResultsResponse)
 async def get_personal_results(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
     """
     Получение персональных результатов пользователя

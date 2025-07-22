@@ -95,7 +95,7 @@ celery_app.conf.beat_schedule = {
     },
     "calculate-aura-scores": {
         "task": "src.tasks.calculate_aura_scores.calculate_aura_scores",
-        "schedule": 150.0,  # Каждый час (3600 секунд)
+        "schedule": 3600.0,  # Каждый час (3600 секунд)
         "options": {"queue": "default"},
     },
 }
