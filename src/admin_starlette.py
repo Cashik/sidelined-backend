@@ -44,6 +44,7 @@ from src.models import (
     ProjectAccountStatus,
     ProjectLeaderboardHistory,
     ScorePayout,
+    PostAuraScore,
 )
 from src import enums
 
@@ -490,6 +491,26 @@ class ScorePayoutAdmin(AdminWriteModeratorReadView):
     exclude_fields_from_edit = ["id", "created_at"]
 
 
+class PostAuraScoreAdmin(AdminWriteModeratorReadView):
+    label = "Post Aura Scores"
+    icon = "fa fa-star"
+    page_size = 100
+    sortable_fields = ["id", "created_at", "aura_score"]
+    searchable_fields = ["post_id", "project_id", "social_account_id"]
+    fields = [
+        IntegerField("id", label="ID", read_only=True),
+        IntegerField("post_id", label="Post ID", read_only=True),
+        IntegerField("project_id", label="Project ID", read_only=True),
+        IntegerField("social_account_id", label="Social Account ID", read_only=True),
+        FloatField("aura_score", label="Aura Score"),
+        TextAreaField("post_full_text", label="Post Full Text", read_only=True),
+        JSONField("ai_report", label="AI Report"),
+        IntegerField("created_at", label="Created At", read_only=True),
+    ]
+    exclude_fields_from_create = ["id", "created_at", "post_id", "project_id", "social_account_id", "post_full_text"]
+    exclude_fields_from_edit = ["id", "created_at", "post_id", "project_id", "social_account_id", "post_full_text"]
+
+
 class ExportLeaderboardView(CustomView):
     """Кастомная страница для экспорта лидерборда в Excel"""
     
@@ -647,6 +668,7 @@ def setup_admin(app: Any) -> None:  # FastAPI/Starlette app
     admin.add_view(ProjectAccountStatusAdmin(ProjectAccountStatus, label="Project Account Status", icon="fa fa-link"))
     admin.add_view(ProjectLeaderboardHistoryAdmin(ProjectLeaderboardHistory, label="Leaderboard History", icon="fa fa-trophy"))
     admin.add_view(ScorePayoutAdmin(ScorePayout, label="Score Payouts", icon="fa fa-coins"))
+    admin.add_view(PostAuraScoreAdmin(PostAuraScore, label="Post Aura Scores", icon="fa fa-star"))
     admin.add_view(ExportLeaderboardView(
         label="Export Leaderboard", 
         icon="fa fa-download", 

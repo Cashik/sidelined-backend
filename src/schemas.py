@@ -546,3 +546,17 @@ class PostForAura(BaseModel):
 class BrainRequest(BaseModel):
     post_text: str
 
+
+# Aura Scores schemas
+class AuraScoreRecord(BaseModel):
+    post_full_text: str  # сам пост
+    created_at: int  # время начисления
+    aura_score: float  # количество очков
+    project_id: int
+    project_name: str
+
+
+class GetAuraScoresResponse(BaseModel):
+    aura_scores: List[AuraScoreRecord]
+    total_aura_score: float
+

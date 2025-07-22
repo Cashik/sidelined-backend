@@ -86,7 +86,7 @@ async def ask_ai_to_calculate_posts_aura_score(posts: List[PostForAura]) -> Aura
 
     system_prompt = create_aura_system_prompt(posts)
 
-    logger.info(f"System prompt: {system_prompt}")
+    #logger.info(f"System prompt: {system_prompt}")
 
     # Определяем модель и провайдер (используем Gemini по умолчанию для анализа)
     model = Model.GEMINI_2_5_PRO

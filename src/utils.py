@@ -2138,8 +2138,303 @@ async def create_leaderboard_excel(project_id: int, db: Session, output_path: st
         return False
 
 
-async def calculate_daily_aura_score(db: Session):
+async def calculate_daily_aura_score(project: models.Project, db: Session):
     """
     Рассчитывает Aura score для постов за сутки.
+    
+    1. собираем все посты по проекту за прошлые сутки (now-2*day до now-day)
+    фильтруем:
+    - пост должен быть длиннее 100 символов
+    - для каждого юзера берем 2 топ поста по engagement_score
+    - пост не должен быть уже оценен
+    - social_account должен быть подключен
+    
+    
+    2. Разбиваем посты на пачки по X постов и обрабатываем по очереди
+    - не забывем посты, котоыре не удалось оценить по какой-то причине и обрабатываем их еще раз отдельно
+    
+    3. Сохраняем результаты в базу данных
+
     """
-    pass
+    from sqlalchemy import func, distinct, text, desc
+    from src.services import aura_service
+    from src.config import aura
+    from src import schemas, utils_base
+    from src.exceptions import PostTextExtractionError
+    
+    BATCH_SIZE = 10  # максимальное количество постов в одном запросе к AI
+    MAX_TO_ANALYZE = 10 # максимальное количество постов для анализа
+    MIN_TEXT_LENGTH = 100  # минимальная длина текста поста
+    POSTS_PER_USER = 2  # максимальное количество постов от одного пользователя
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Начинаю расчет Aura score для проекта {project.name} (ID: {project.id})")
+    
+    # Определяем временной диапазон для выборки постов
+    now = utils_base.now_timestamp()
+    day_seconds = 86400
+    start_time = now - 2 * day_seconds
+    end_time = now - day_seconds
+    
+    # TODO: сдвиг нижней границы, чтобы не собирать уже проанализированные посты
+    
+    # 1. Получаем все посты с упоминанием данного проекта в указанном временном диапазоне
+    mentions_query = (
+        db.query(models.ProjectMention.post_id)
+        .filter(models.ProjectMention.project_id == project.id)
+    )
+    
+    # Подготавливаем запрос для получения постов
+    posts_query = (
+        db.query(models.SocialPost)
+        .filter(models.SocialPost.id.in_(mentions_query))
+        .filter(models.SocialPost.posted_at >= start_time)
+        .filter(models.SocialPost.posted_at <= end_time)
+    )
+    
+    # Загружаем уже оцененные посты, чтобы исключить их из обработки
+    already_scored_post_ids = (
+        db.query(models.PostAuraScore.post_id)
+        .distinct()
+    )
+    
+    posts_query = posts_query.filter(~models.SocialPost.id.in_(already_scored_post_ids))
+    
+    # Получаем все подходящие посты
+    all_posts = posts_query.all()
+    
+    if not all_posts:
+        logger.info(f"Не найдено постов за указанный период для проекта {project.name}")
+        return 0
+    
+    logger.info(f"Найдено {len(all_posts)} постов для анализа")
+    
+    # Сначала фильтруем посты по длине текста и подключенности аккаунта
+    posts_with_length = []
+    filtered_by_connected_accounts = []
+    
+    for post in all_posts:
+        try:
+            full_text = utils_base.extract_full_post_text(post.raw_data, post.text)
+            if len(full_text) >= MIN_TEXT_LENGTH:
+                posts_with_length.append((post, full_text))
+        except PostTextExtractionError:
+            logger.warning(f"Не удалось извлечь текст для поста ID {post.id}")
+            continue
+    
+    logger.info(f"После фильтрации по длине осталось {len(posts_with_length)} постов")
+    
+    # Проверяем, подключен ли аккаунт к пользователю приложения
+    for post, full_text in posts_with_length:
+        social_account = db.query(models.SocialAccount).filter(models.SocialAccount.id == post.account_id).first()
+        if not social_account:
+            logger.error(f"Социальный аккаунт не найден для поста ID {post.id}")
+            continue
+            
+        # Проверяем, есть ли пользователь с привязанным social_account (через twitter_login)
+        connected_user = db.query(models.User).filter(
+            models.User.twitter_login == social_account.social_login
+        ).first()
+        
+        if connected_user or settings.DEBUG:
+            # Вычисляем engagement_score для поста
+            post_stats: schemas.PostStats = convert_posts_to_schemas([post])[0].stats
+            engagement_score = calculate_post_engagement_score(
+                post_stats.views_count or 0,
+                post_stats.favorite_count or 0,
+                post_stats.retweet_count or 0,
+                post_stats.reply_count or 0
+            )
+            filtered_by_connected_accounts.append((post, full_text, engagement_score))
+        else:
+            logger.debug(f"Аккаунт {social_account.social_login} не подключен к пользователю приложения")
+    
+    logger.info(f"После фильтрации по подключенным аккаунтам осталось {len(filtered_by_connected_accounts)} постов")
+    
+    if not filtered_by_connected_accounts:
+        logger.info("После фильтрации не осталось постов для анализа")
+        return 0
+    
+    # Группируем посты по аккаунту и выбираем топ-2 для каждого
+    posts_by_account = {}
+    for post, full_text, engagement_score in filtered_by_connected_accounts:
+        account_id = post.account_id
+        if account_id not in posts_by_account:
+            posts_by_account[account_id] = []
+        
+        posts_by_account[account_id].append((post, full_text, engagement_score))
+    
+    # Для каждого аккаунта выбираем топ-2 поста по engagement_score
+    final_filtered_posts = []
+    
+    # Получаем количество уже оцененных постов для каждого аккаунта за последние 24 часа
+    last_24h_start_time = now - day_seconds
+    already_processed_counts = (
+        db.query(models.PostAuraScore.social_account_id, func.count(models.PostAuraScore.id))
+        .filter(models.PostAuraScore.created_at >= last_24h_start_time)
+        .group_by(models.PostAuraScore.social_account_id)
+        .all()
+    )
+    already_processed_counts_map = {acc_id: count for acc_id, count in already_processed_counts}
+    
+    logger.info(f"Найдено {len(already_processed_counts_map)} аккаунтов с постами, оцененными за последние 24 часа.")
+
+    for account_id, account_posts in posts_by_account.items():
+        already_scored_count = already_processed_counts_map.get(account_id, 0)
+
+        if already_scored_count >= POSTS_PER_USER:
+            logger.info(f"Пропускаем аккаунт ID {account_id}, так как у него уже есть {already_scored_count} оцененных постов за последние 24 часа.")
+            continue
+
+        posts_to_take = POSTS_PER_USER - already_scored_count
+        
+        # Сортируем посты по engagement_score в порядке убывания
+        sorted_posts = sorted(account_posts, key=lambda x: x[2], reverse=True)
+        
+        # Берем оставшееся количество постов
+        top_posts = sorted_posts[:posts_to_take]
+        final_filtered_posts.extend([(post, full_text) for post, full_text, _ in top_posts])
+    
+    logger.info(f"После фильтрации с учетом дневного лимита на пользователя осталось {len(final_filtered_posts)} постов")
+    
+    if not final_filtered_posts:
+        logger.info("После всех фильтраций не осталось постов для анализа")
+        return 0
+    
+    # 2. Разбиваем посты на пакеты и обрабатываем
+    processed_posts = 0
+    failed_posts = []
+    result = []  # Здесь будем хранить все объекты PostAuraScore для последующего сохранения
+    
+    # Разбиваем на пакеты по BATCH_SIZE
+    for i in range(0, len(final_filtered_posts), BATCH_SIZE):
+        batch = final_filtered_posts[i:i+BATCH_SIZE]
+        logger.info(f"Обработка пакета {i//BATCH_SIZE + 1} из {(len(final_filtered_posts) + BATCH_SIZE - 1) // BATCH_SIZE}, размер: {len(batch)}")
+        
+        posts_for_aura = []
+        temp_id_to_real_id = {}  # для сопоставления временных ID с реальными ID постов
+        temp_id_to_post_data = {}  # для сопоставления временных ID с данными поста
+        
+        for j, (post, full_text) in enumerate(batch):
+            try:
+                temp_id = j + 1  # временный ID для API запроса
+                posts_for_aura.append(schemas.PostForAura(id=temp_id, text=full_text))
+                temp_id_to_real_id[temp_id] = post.id
+                temp_id_to_post_data[temp_id] = (post, full_text)
+            except Exception as e:
+                logger.warning(f"Ошибка при подготовке поста ID {post.id} для API: {e}")
+                failed_posts.append((post, full_text))
+                continue
+        
+        if not posts_for_aura:
+            logger.warning("В текущем пакете нет постов для обработки")
+            continue
+        
+        # Отправляем запрос на оценку постов
+        try:
+            aura_results = await aura_service.ask_ai_to_calculate_posts_aura_score(posts_for_aura)
+            
+            # Создаем объекты PostAuraScore
+            if aura_results and aura_results.posts_scores:
+                for score_item in aura_results.posts_scores:
+                    temp_id = score_item.post_id
+                    if temp_id not in temp_id_to_real_id:
+                        logger.warning(f"Получен результат для несуществующего поста с temp_id={temp_id}")
+                        continue
+                        
+                    real_post_id = temp_id_to_real_id[temp_id]
+                    post, post_full_text = temp_id_to_post_data[temp_id]
+                    
+                    # Рассчитываем суммарный Aura score
+                    total_aura_points = 0.0
+                    for criterion_info in aura.criteria_list:
+                        criterion_id = criterion_info['id']
+                        max_points = criterion_info['max_points']
+                        
+                        # Получаем оценку по текущему критерию (0-10)
+                        criterion_score = getattr(score_item.scores, criterion_id, 0)
+                        
+                        # Пересчитываем в очки Aura
+                        aura_points = (criterion_score / 10.0) * max_points
+                        total_aura_points += aura_points
+                    
+                    # Создаем объект PostAuraScore
+                    post_aura_score = models.PostAuraScore(
+                        post_id=real_post_id,
+                        project_id=project.id,
+                        social_account_id=post.account_id,
+                        aura_score=total_aura_points,
+                        post_full_text=post_full_text,
+                        ai_report=score_item.scores.model_dump_json(),  # Сохраняем детальные оценки в JSON
+                    )
+                    
+                    # Добавляем в список результатов
+                    result.append(post_aura_score)
+                    processed_posts += 1
+                
+                logger.info(f"Создано {len(aura_results.posts_scores)} объектов PostAuraScore для текущего пакета")
+            else:
+                logger.warning("Не получено результатов от сервиса Aura")
+                
+        except Exception as e:
+            logger.error(f"Ошибка при обработке пакета: {e}")
+            # Добавляем все посты из текущего пакета в список неудачных
+            for post, full_text in batch:
+                failed_posts.append((post, full_text))
+    
+    # Обрабатываем посты, которые не удалось обработать с первого раза
+    if failed_posts:
+        logger.info(f"Повторная обработка {len(failed_posts)} постов, которые не удалось обработать с первого раза")
+        # Обрабатываем по одному
+        
+        for post, full_text in failed_posts:
+            try:
+                posts_for_aura = [schemas.PostForAura(id=1, text=full_text)]
+                
+                aura_results = await aura_service.ask_ai_to_calculate_posts_aura_score(posts_for_aura)
+                
+                if aura_results and aura_results.posts_scores and len(aura_results.posts_scores) > 0:
+                    score_item = aura_results.posts_scores[0]
+                    
+                    # Рассчитываем суммарный Aura score
+                    total_aura_points = 0.0
+                    for criterion_info in aura.criteria_list:
+                        criterion_id = criterion_info['id']
+                        max_points = criterion_info['max_points']
+                        
+                        # Получаем оценку по текущему критерию (0-10)
+                        criterion_score = getattr(score_item.scores, criterion_id, 0)
+                        
+                        # Пересчитываем в очки Aura
+                        aura_points = (criterion_score / 10.0) * max_points
+                        total_aura_points += aura_points
+                    
+                    # Создаем объект PostAuraScore
+                    post_aura_score = models.PostAuraScore(
+                        post_id=post.id,
+                        project_id=project.id,
+                        social_account_id=post.account_id,
+                        aura_score=total_aura_points,
+                        post_full_text=full_text,
+                        ai_report=score_item.scores.model_dump_json(),  # Сохраняем детальные оценки в JSON
+                    )
+                    
+                    # Добавляем в список результатов
+                    result.append(post_aura_score)
+                    processed_posts += 1
+            except Exception as e:
+                logger.error(f"Повторная обработка поста ID {post.id} не удалась: {e}")
+                continue
+    
+    # 3. Сохраняем все результаты в базу данных
+    if result:
+        try:
+            for post_aura_score in result:
+                db.add(post_aura_score)
+            db.commit()
+            logger.info(f"Сохранено {len(result)} записей Aura score в базу данных")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении результатов в базу данных: {e}")
+            db.rollback()
+    logger.info(f"Расчет Aura score завершен. Обработано постов: {processed_posts}")
+    return processed_posts

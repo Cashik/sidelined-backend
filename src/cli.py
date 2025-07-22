@@ -693,6 +693,48 @@ def export_season_one_winners_csv():
         session.close()
 
 
+def calculate_daily_aura(project_id: int = None):
+    """
+    Рассчитывает Aura score для постов за сутки для указанного проекта или всех проектов с лидербордом.
+    
+    Args:
+        project_id: ID проекта для расчета. Если не указан, обрабатываются все проекты с лидербордом.
+    """
+    session = SessionLocal()
+    try:
+        if project_id is not None:
+            project = session.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                print(f"Проект с ID={project_id} не найден")
+                return
+                
+            print(f"Расчет Aura score для проекта: {project.name} (ID={project_id})")
+            processed = asyncio.run(utils.calculate_daily_aura_score(project, session))
+            print(f"Обработано {processed} постов для проекта {project.name}")
+        else:
+            # Если ID не указан, обрабатываем все проекты с лидербордом
+            projects = session.query(Project).filter(Project.is_leaderboard_project == True).all()
+            if not projects:
+                print("Не найдено проектов с включенным лидербордом")
+                return
+                
+            total_processed = 0
+            for project in projects:
+                print(f"Расчет Aura score для проекта: {project.name} (ID={project.id})")
+                processed = asyncio.run(utils.calculate_daily_aura_score(project, session))
+                if processed:
+                    total_processed += processed
+                    print(f"Обработано {processed} постов")
+                else:
+                    print("Посты не найдены или не обработаны")
+                    
+            print(f"Всего обработано {total_processed} постов для {len(projects)} проектов")
+    except Exception as e:
+        print(f"Произошла ошибка при расчете Aura score: {e}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Утилиты для управления базой данных')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
@@ -770,6 +812,10 @@ def main():
     # Команда экспорта победителей первого сезона в CSV
     export_season_winners_parser = subparsers.add_parser('export-season-winners', help='Экспортировать данные победителей первого сезона в CSV')
 
+    # Команда ежедневного расчета Aura score
+    daily_aura_parser = subparsers.add_parser('calculate-daily-aura', help='Рассчитать Aura score для постов за сутки')
+    daily_aura_parser.add_argument('--project-id', '-p', type=int, required=False, help='ID проекта (если не указан, обрабатываются все проекты с лидербордом)')
+
 
     args = parser.parse_args()
 
@@ -811,6 +857,8 @@ def main():
         export_leaderboard(args.project_id, args.output_path)
     elif args.command == 'export-season-winners':
         export_season_one_winners_csv()
+    elif args.command == 'calculate-daily-aura':
+        calculate_daily_aura(args.project_id)
     else:
         parser.print_help()
 
@@ -836,6 +884,8 @@ python -m src.cli get-arbus-score -l "HANDLE"
 python -m src.cli calculate-aura
 python -m src.cli export-leaderboard -p 1 -o leaderboard.xlsx
 python -m src.cli export-season-winners
+python -m src.cli calculate-daily-aura
+python -m src.cli calculate-daily-aura -p 1
 """
 
 if __name__ == "__main__":

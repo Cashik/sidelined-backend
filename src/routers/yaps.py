@@ -324,6 +324,7 @@ class PersonalResultsResponse(BaseModel):
     loyalty_bonus: Multiplier # todo: разобраться с этим параметром
     streak_bonus: Multiplier
     new_author_bonus: Multiplier
+    total_aura_score: float = 0.0  # Общее количество aura очков
 
 def _calc_mindshare(payouts, start_ts, end_ts) -> float:
     """
@@ -375,7 +376,8 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
             mindshare=MindshareTable(current=0, today=0, yesterday=0),
             loyalty_bonus=Multiplier(value=0, multiplier=1.0),
             streak_bonus=Multiplier(value=0, multiplier=1.0),
-            new_author_bonus=Multiplier(value=0, multiplier=1.0)
+            new_author_bonus=Multiplier(value=0, multiplier=1.0),
+            total_aura_score=0.0
         )
 
     # 4. Получаем все payouts по этому проекту и social_account
@@ -388,7 +390,8 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
             mindshare=MindshareTable(current=0, today=0, yesterday=0),
             loyalty_bonus=Multiplier(value=0, multiplier=1.0),
             streak_bonus=Multiplier(value=0, multiplier=1.0),
-            new_author_bonus=Multiplier(value=0, multiplier=1.0)
+            new_author_bonus=Multiplier(value=0, multiplier=1.0),
+            total_aura_score=0.0
         )
 
     # Считаем не ровно день назад, а за чуть меньший промежуток времени ( не учитываем время с последнего обновления)
@@ -429,6 +432,12 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
     new_author_bonus = now_ts - last_payout.first_post_at < day_seconds*7
     new_author_bonus = Multiplier(value=int(new_author_bonus), multiplier=(10 if new_author_bonus else 1))
     
+    # Получаем общее количество aura очков для этого социального аккаунта
+    total_aura = db.query(models.PostAuraScore).filter(
+        models.PostAuraScore.social_account_id == social_account.id
+    ).all()
+    total_aura_score = sum(score.aura_score for score in total_aura)
+
     return PersonalResultsResponse(
         total_score=sum(p.score for p in payouts),
         mindshare=MindshareTable(
@@ -438,7 +447,8 @@ async def get_personal_results(user: models.User = Depends(get_current_user), db
         ),
         loyalty_bonus=loyalty_bonus,
         streak_bonus=streak_bonus,
-        new_author_bonus=new_author_bonus
+        new_author_bonus=new_author_bonus,
+        total_aura_score=total_aura_score
     )
     
 @router.post("/og-bonus")
@@ -452,4 +462,48 @@ async def activate_og_bonus(user: models.User = Depends(get_current_user), db: S
     user.og_bonus_activated = True
     db.commit()
     return {"success": True, "message": "activated"}
+
+
+@router.get("/aura/history", response_model=schemas.GetAuraScoresResponse)
+async def get_user_aura_history(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+    """
+    Получение истории aura scores пользователя
+    """
+    # 1. Проверяем наличие twitter_login
+    if not user.twitter_login:
+        raise exceptions.XAccountNotLinkedError()
+
+    # 2. Получаем social_account по twitter_login
+    social_account = db.query(models.SocialAccount).filter(
+        models.SocialAccount.social_login == user.twitter_login
+    ).first()
+    if not social_account:
+        logger.error(f"User {user.id} has no social_account")
+        return schemas.GetAuraScoresResponse(aura_scores=[], total_aura_score=0.0)
+
+    # 3. Получаем все aura scores для этого социального аккаунта
+    aura_scores = db.query(models.PostAuraScore).filter(
+        models.PostAuraScore.social_account_id == social_account.id
+    ).join(
+        models.Project, models.PostAuraScore.project_id == models.Project.id
+    ).order_by(models.PostAuraScore.created_at.desc()).all()
+
+    # 4. Преобразуем в схему
+    aura_records = []
+    total_score = 0.0
+    
+    for score in aura_scores:
+        aura_records.append(schemas.AuraScoreRecord(
+            post_full_text=score.post_full_text,
+            created_at=score.created_at,
+            aura_score=score.aura_score,
+            project_id=score.project_id,
+            project_name=score.project.name
+        ))
+        total_score += score.aura_score
+
+    return schemas.GetAuraScoresResponse(
+        aura_scores=aura_records,
+        total_aura_score=total_score
+    )
 

@@ -177,7 +177,8 @@ class Project(Base):
     user_selected_projects = relationship("UserSelectedProject", back_populates="project", cascade="all, delete-orphan")
     posts_templates = relationship("PostTemplate", back_populates="project", cascade="all, delete-orphan")
     leaderboard_history = relationship("ProjectLeaderboardHistory", back_populates="project", cascade="all, delete-orphan")
-
+    aura_scores = relationship("PostAuraScore", back_populates="project", cascade="all, delete-orphan")
+    
     def __str__(self) -> str:
         return f"{self.name}"
     
@@ -228,11 +229,8 @@ class SocialAccount(Base):
     # Relationships
     posts = relationship("SocialPost", back_populates="account", cascade="all, delete-orphan")
     projects = relationship("ProjectAccountStatus", back_populates="account")
-    scores = relationship(
-        "ScorePayout",
-        back_populates="social_account",
-        cascade="all, delete-orphan"
-    )
+    scores = relationship("ScorePayout", back_populates="social_account", cascade="all, delete-orphan")
+    aura_scores = relationship("PostAuraScore", back_populates="social_account", cascade="all, delete-orphan")
     
     def __str__(self) -> str:
         if self.name:
@@ -273,6 +271,7 @@ class SocialPost(Base):
     account = relationship("SocialAccount", back_populates="posts")
     statistic = relationship("SocialPostStatistic", back_populates="post", cascade="all, delete-orphan")
     mentions = relationship("ProjectMention", back_populates="post", cascade="all, delete-orphan")
+    aura_score = relationship("PostAuraScore", back_populates="post", cascade="all, delete-orphan")
 
 
 class SocialPostStatistic(Base):
@@ -356,6 +355,26 @@ class ProjectMention(Base):
     project = relationship("Project", back_populates="mentions")
     post = relationship("SocialPost", back_populates="mentions")
 
+
+class PostAuraScore(Base):
+    __tablename__ = "post_aura_score"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+    
+    post_id = Column(Integer, ForeignKey("social_post.id", ondelete="SET NULL"), nullable=True)
+    social_account_id = Column(Integer, ForeignKey("social_account.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
+    
+    post_full_text = Column(String, nullable=False)
+    aura_score = Column(Float, nullable=False)
+    ai_report = Column(postgresql.JSONB, nullable=False)
+    
+    
+    # Relationships
+    post = relationship("SocialPost", back_populates="aura_score")
+    social_account = relationship("SocialAccount", back_populates="aura_scores")
+    project = relationship("Project", back_populates="aura_scores")
 
 class AdminUser(Base):
     """Администратор/модератор системы"""

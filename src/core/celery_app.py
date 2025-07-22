@@ -59,6 +59,7 @@ celery_app = Celery(
     include=[
         "src.tasks.master_update",  # регистрируем модуль с задачами
         "src.tasks.create_autoyaps",  # регистрируем модуль с задачами создания авто-постов
+        "src.tasks.calculate_aura_scores",  # регистрируем модуль с задачами расчета Aura scores
     ],
 )
 
@@ -92,12 +93,18 @@ celery_app.conf.beat_schedule = {
         "schedule": settings.MASTER_UPDATE_PERIOD_SECONDS,
         "options": {"queue": "master_update"},
     },
+    "calculate-aura-scores": {
+        "task": "src.tasks.calculate_aura_scores.calculate_aura_scores",
+        "schedule": 150.0,  # Каждый час (3600 секунд)
+        "options": {"queue": "default"},
+    },
 }
 
 # Роутинг задач
 celery_app.conf.task_routes = {
     "src.tasks.create_autoyaps.create_autoyaps": {"queue": "default"},
     "src.tasks.master_update.master_update": {"queue": "master_update"},
+    "src.tasks.calculate_aura_scores.calculate_aura_scores": {"queue": "default"},
 }
 
 # Дополнительные настройки для стабильной работы
