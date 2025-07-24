@@ -536,6 +536,12 @@ class LeaderboardUser(BaseModel):
     posts_period: int
     posts_all_time: int
     is_connected: bool = False
+    total_aura: float = 0
+    period_aura: float = 0
+
+
+class LeaderboardResponse(BaseModel):
+    users: List[LeaderboardUser]
 
 
 class PostForAura(BaseModel):

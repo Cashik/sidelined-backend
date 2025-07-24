@@ -1895,8 +1895,62 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
     # окончание периода - это максимальный end_ts среди всех периодов
     end_ts = max(history.end_ts for history in histories)
     first_ts = min(history.start_ts for history in histories)
-    
+
+    # Получаем все social_account_id из all_time_users
+    social_account_ids = list(all_time_users.keys())
+
+    # --- РАСЧЕТ AURA ---
+    # Рассчитываем aura для всех периодов одним запросом с условными агрегациями
+    from sqlalchemy import func, case
     ONE_DAY = 86400
+    
+    # Определяем границы всех периодов
+    periods_bounds = {
+        'total': (0, end_ts),
+        'one_day': (end_ts - ONE_DAY, end_ts),
+        'one_week': (end_ts - ONE_DAY*7, end_ts),
+        'one_month': (end_ts - ONE_DAY*30, end_ts)
+    }
+    
+    # Один запрос для всех периодов с условными агрегациями
+    aura_data = (
+        db.query(
+            models.PostAuraScore.social_account_id,
+            func.sum(models.PostAuraScore.aura_score).label("total_aura"),
+            func.sum(
+                case(
+                    (models.PostAuraScore.created_at >= periods_bounds['one_day'][0], models.PostAuraScore.aura_score),
+                    else_=0
+                )
+            ).label("one_day_aura"),
+            func.sum(
+                case(
+                    (models.PostAuraScore.created_at >= periods_bounds['one_week'][0], models.PostAuraScore.aura_score),
+                    else_=0
+                )
+            ).label("one_week_aura"),
+            func.sum(
+                case(
+                    (models.PostAuraScore.created_at >= periods_bounds['one_month'][0], models.PostAuraScore.aura_score),
+                    else_=0
+                )
+            ).label("one_month_aura")
+        )
+        .filter(models.PostAuraScore.social_account_id.in_(social_account_ids))
+        .group_by(models.PostAuraScore.social_account_id)
+        .all()
+    )
+    
+    # Создаем словари для быстрого доступа
+    aura_maps = {}
+    for row in aura_data:
+        account_id = row.social_account_id
+        aura_maps[account_id] = {
+            'total': row.total_aura or 0.0,
+            'one_day': row.one_day_aura or 0.0,
+            'one_week': row.one_week_aura or 0.0,
+            'one_month': row.one_month_aura or 0.0
+        }
     
     # для каждого периода считаем данные
     for cached_preriod in cache_service.LeaderboardPeriod:
@@ -1911,6 +1965,19 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
         else:
             raise ValueError(f"Unknown leaderboard period: {cached_preriod}")
         start_ts = max(start_ts, first_ts)
+
+        # Определяем ключ для получения period_aura из предвычисленных данных
+        if cached_preriod == cache_service.LeaderboardPeriod.ALL_TIME:
+            period_aura_key = 'total'
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_DAY:
+            period_aura_key = 'one_day'
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_WEEK:
+            period_aura_key = 'one_week'
+        elif cached_preriod == cache_service.LeaderboardPeriod.ONE_MONTH:
+            period_aura_key = 'one_month'
+        else:
+            period_aura_key = 'total'
+
         # для подсчета взвешенного mindshare
         all_period_seconds = end_ts - start_ts
         def timespan_to_str(ts: int) -> str:
@@ -1935,19 +2002,21 @@ async def get_leaderboard(project: models.Project, period: cache_service.Leaderb
                         # такого не должно быть, но если что, то пропускаем
                         logger.error(f"[Leaderboard] No all time data for social account {payout.social_account_id}")
                         continue
+                    user_aura_data = aura_maps.get(payout.social_account_id, {})
                     leaderboard_users[payout.social_account_id] = schemas.LeaderboardUser(
                         avatar_url=user_all_time_data.avatar_url,
                         name=user_all_time_data.name or "",
                         login=user_all_time_data.login or "",
                         followers=user_all_time_data.followers,
                         mindshare=0,
-                        mindshare_delta=0,
                         engagement=0,
                         scores=0,
                         scores_all_time=user_all_time_data.score,
                         posts_period=0,
                         posts_all_time=user_all_time_data.posts,
                         is_connected=user_all_time_data.is_connected,
+                        total_aura=user_aura_data.get('total', 0.0),
+                        period_aura=user_aura_data.get(period_aura_key, 0.0)
                     )
                 leaderboard_users[payout.social_account_id].scores += payout.score if payout.score is not None else 0
                 leaderboard_users[payout.social_account_id].posts_period += payout.new_posts_count if payout.new_posts_count is not None else 0
