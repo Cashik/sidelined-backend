@@ -207,15 +207,19 @@ class LeaderboardResponse(BaseModel):
 @router.get("/leaderboard", response_model=LeaderboardResponse)
 async def get_leaderboard(
     period: LeaderboardPeriod = Query(LeaderboardPeriod.ONE_DAY, description="Период для лидерборда: 1d, 1w, 1m, all"),
+    project_id: int = Query(..., description="ID проекта для лидерборда (обязательный параметр)"),
     db: Session = Depends(get_session)
 ):
     """
-    Получение лидерборда за определённый период (1d, 1w, 1m, all)
+    Получение лидерборда за определённый период (1d, 1w, 1m, all) для указанного проекта
     """
-    # 1. Получаем первый проект с is_leaderboard_project=True
-    project = db.query(models.Project).filter(models.Project.is_leaderboard_project == True).first()
+    # 1. Получаем проект для лидерборда
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id,
+        models.Project.is_leaderboard_project == True
+    ).first()
     if not project:
-        return LeaderboardResponse(users=[])
+        raise HTTPException(status_code=404, detail=f"Leaderboard project with id '{project_id}' not found")
 
     users = await utils.get_leaderboard(project, period, db)
     users_schemas = [schemas.LeaderboardUser(**user) for user in users]
@@ -352,18 +356,25 @@ def _calc_mindshare(payouts, start_ts, end_ts) -> float:
     return user_mindshare
     
 @router.get("/leaderboard/personal", response_model=PersonalResultsResponse)
-async def get_personal_results(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def get_personal_results(
+    project_id: int = Query(..., description="ID проекта для персональных результатов (обязательный параметр)"),
+    user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_session)
+):
     """
-    Получение персональных результатов пользователя
+    Получение персональных результатов пользователя для указанного проекта лидерборда
     """
     # 1. Проверяем наличие twitter_login
     if not user.twitter_login:
         raise exceptions.XAccountNotLinkedError()
 
-    # 2. Получаем первый проект с is_leaderboard_project=True
-    project = db.query(models.Project).filter(models.Project.is_leaderboard_project == True).first()
+    # 2. Получаем проект для лидерборда
+    project = db.query(models.Project).filter(
+        models.Project.id == project_id,
+        models.Project.is_leaderboard_project == True
+    ).first()
     if not project:
-        raise HTTPException(status_code=404, detail="There is no leaderboard project.")
+        raise HTTPException(status_code=404, detail=f"Leaderboard project with id '{project_id}' not found")
 
     # 3. Получаем social_account по twitter_login
     social_account = db.query(models.SocialAccount).filter(models.SocialAccount.social_login == user.twitter_login).first()
@@ -465,15 +476,28 @@ async def activate_og_bonus(user: models.User = Depends(get_current_user), db: S
 
 
 @router.get("/aura/history", response_model=schemas.GetAuraScoresResponse)
-async def get_user_aura_history(user: models.User = Depends(get_current_user), db: Session = Depends(get_session)):
+async def get_user_aura_history(
+    project_id: int = Query(..., description="ID проекта для фильтрации истории Aura (обязательный параметр)"),
+    user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_session)
+):
     """
-    Получение истории aura scores пользователя
+    Получение истории aura scores пользователя для указанного проекта
     """
-    # 1. Проверяем наличие twitter_login
+    # 1. Проверяем наличие project_id
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    
+    # 2. Проверяем существование проекта
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project with id '{project_id}' not found")
+
+    # 3. Проверяем наличие twitter_login
     if not user.twitter_login:
         raise exceptions.XAccountNotLinkedError()
 
-    # 2. Получаем social_account по twitter_login
+    # 4. Получаем social_account по twitter_login
     social_account = db.query(models.SocialAccount).filter(
         models.SocialAccount.social_login == user.twitter_login
     ).first()
@@ -481,14 +505,15 @@ async def get_user_aura_history(user: models.User = Depends(get_current_user), d
         logger.error(f"User {user.id} has no social_account")
         return schemas.GetAuraScoresResponse(aura_scores=[], total_aura_score=0.0)
 
-    # 3. Получаем все aura scores для этого социального аккаунта
-    aura_scores = db.query(models.PostAuraScore).filter(
-        models.PostAuraScore.social_account_id == social_account.id
-    ).join(
-        models.Project, models.PostAuraScore.project_id == models.Project.id
-    ).order_by(models.PostAuraScore.created_at.desc()).all()
+    # 5. Получаем все aura scores для этого социального аккаунта для указанного проекта
+    query = db.query(models.PostAuraScore).filter(
+        models.PostAuraScore.social_account_id == social_account.id,
+        models.PostAuraScore.project_id == project_id
+    )
+    
+    aura_scores = query.order_by(models.PostAuraScore.created_at.desc()).all()
 
-    # 4. Преобразуем в схему
+    # 6. Преобразуем в схему
     aura_records = []
     total_score = 0.0
     
@@ -498,7 +523,7 @@ async def get_user_aura_history(user: models.User = Depends(get_current_user), d
             created_at=score.created_at,
             aura_score=score.aura_score,
             project_id=score.project_id,
-            project_name=score.project.name
+            project_name=project.name
         ))
         total_score += score.aura_score
 

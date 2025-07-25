@@ -1395,7 +1395,7 @@ def is_leaderboard_blacklisted(account: models.SocialAccount, db: Session) -> bo
     for project in account.projects:
         if project.type == enums.ProjectAccountStatusType.MEDIA:
             return True
-    
+            
     return False
 
 
@@ -1405,6 +1405,7 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     """
     from pydantic import BaseModel
     from sqlalchemy import desc
+    from config import aethir_project
     import asyncio
 
     class ProjectLeaderboardUser:
@@ -1452,6 +1453,11 @@ async def update_project_leaderboard(project: models.Project, db: Session):
         # пропускаем посты, автор которых в черном списке по лидерборду
         if is_leaderboard_blacklisted(post.account, db):
             continue
+        
+        # пропускаем посты, автор которых в черном списке по проекту
+        if project.name == aethir_project.PROJECT_NAME:
+            if not aethir_project.is_aethir_whitelisted(post.account.social_login):
+                continue
         
         # Найти свежую статистику за период (created_at >= period_start)
         stats_in_period = [s for s in post.statistic if s.created_at >= period_start]
