@@ -1405,7 +1405,7 @@ async def update_project_leaderboard(project: models.Project, db: Session):
     """
     from pydantic import BaseModel
     from sqlalchemy import desc
-    from config import aethir_project
+    from src.config import aethir_project
     import asyncio
 
     class ProjectLeaderboardUser:
