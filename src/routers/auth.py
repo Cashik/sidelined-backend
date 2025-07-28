@@ -4,6 +4,7 @@ import uuid
 import time
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from src import crud, schemas, utils, utils_base, enums, models
 from src.core.crypto import verify_signature, validate_payload, SOLANA_NETWORKS_IDS
@@ -11,8 +12,10 @@ from src.core.auth import create_token, decode_token
 from src.core.middleware import get_current_user, get_optional_user
 from src.database import get_session
 from src.config.settings import settings
+from src.exceptions import APIError
 
-router = APIRouter(prefix="/auth")
+
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +25,7 @@ LOGIN_STATEMENT = "Sign in to Sidelined AI using your wallet with required token
 DOMAIN = settings.DOMAIN
 
 @router.post("/login", response_model=schemas.LoginResponse)
-async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
+async def login(request: schemas.LoginRequest, db: Session = Depends(get_session)):
     logger.info(f"Login data received: {request}")
     
     # Определяем семейство сети
@@ -33,20 +36,21 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     
     # Проверяем payload вместе с адресом
     if not validate_payload(request.payload):
-        raise HTTPException(status_code=400, detail="Invalid payload")
+        raise APIError(code="invalid_payload", message="Invalid payload", status_code=400)
     
     # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
-        raise HTTPException(status_code=401, detail="Invalid signature")
+        raise APIError(code="invalid_signature", message="Invalid signature", status_code=401)
     
-    # Фикс старой системы с lowercase адресами
+    # Фиксим старые адреса, которые могли быть сохранены в lowercase
     await crud.fix_old_address_style(request.payload.address, db)
     
     # Получаем или создаем пользователя
     user = await crud.get_or_create_user(
         session=db,
         address=request.payload.address,
-        chain_family=chain_family
+        chain_family=chain_family,
+        referral_code=request.referral_code
     )
     
     # Сбрасываем кредиты если нужно
@@ -77,8 +81,8 @@ async def do_logout():
     # Здесь будет логика для выхода пользователя
     return {"message": "Logout successful"}
 
-@router.post("/login-payload", response_model=schemas.LoginPayload)
-async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
+@router.post("/login-payload", response_model=schemas.LoginPayloadResponse)
+async def get_login_payload(payload_request: schemas.LoginPayloadRequest, db: Session = Depends(get_session)):
     logger.info(f"Login payload request received with data: {payload_request}")
     
     # Генерация уникального nonce
@@ -99,7 +103,12 @@ async def get_login_payload(payload_request: schemas.LoginPayloadRequest):
         expiration_time=time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(expiration_time)),
     )
     logger.info(f"Generated login payload: {payload}")
-    return payload
+    
+    is_new_address = await crud.is_new_address(db, payload_request.address)
+    return schemas.LoginPayloadResponse(
+        payload=payload,
+        is_new_address=is_new_address
+    )
 
 @router.get("/is-logged-in", response_model=schemas.IsLoginResponse)
 async def is_logged_in(user: models.User = Depends(get_optional_user)):

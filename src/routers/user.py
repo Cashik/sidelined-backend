@@ -13,6 +13,7 @@ from src.config.settings import settings
 from src.exceptions import (
     AddressAlreadyExistsError, AddressNotFoundError, LastAddressError, FactNotFoundError, APIError
 )
+from src.services.referral_service import referral_service
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ async def db_user_to_schema_user(user: models.User, db: Session) -> schemas.User
     else:
         chat_settings = schemas.MessageGenerationSettings()
     
+    referral_code = referral_service.generate_referral_code(user.id)
+    
     return schemas.User(
         profile=schemas.UserProfile(
             preferred_name=user.preferred_name, 
@@ -61,7 +64,9 @@ async def db_user_to_schema_user(user: models.User, db: Session) -> schemas.User
         ),
         connected_wallets=wallet_addresses,
         x_login=user.twitter_login,
-        og_bonus_activated=user.og_bonus_activated
+        og_bonus_activated=user.og_bonus_activated,
+        referral_code=referral_code,
+        referrals_made=len(user.referrals_made)
     )
 
 

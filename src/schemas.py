@@ -28,10 +28,14 @@ class LoginPayload(BaseModel):
     issued_at: str
     expiration_time: str
 
+class LoginPayloadResponse(BaseModel):
+    payload: LoginPayload
+    is_new_address: bool
 
 class LoginRequest(BaseModel):
     payload: LoginPayload
     signature: str
+    referral_code: Optional[str] = None
 
 
 class LoginResponse(BaseModel):
@@ -76,6 +80,8 @@ class User(BaseModel):
     connected_wallets: List[WalletAddress]
     x_login: Optional[str] = None
     og_bonus_activated: bool = False
+    referral_code: Optional[str] = None
+    referrals_made: int = 0
 
 # бизнес-схемы токенов
 

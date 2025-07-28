@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload, defer, selectinload
 from src import models, schemas, enums, exceptions, utils_base
 from src.config.settings import settings
 import src.config.subscription_plans as subscriptions
+from src.services.referral_service import referral_service
 
 import logging
 import time
@@ -13,7 +14,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-async def get_or_create_user(session: Session, address: str, chain_family: enums.ChainFamily) -> models.User:
+async def get_or_create_user(session: Session, address: str, chain_family: enums.ChainFamily, referral_code: Optional[str] = None) -> models.User:
     # Сначала ищем пользователя по адресу
     stmt = select(models.WalletAddress).where(
         models.WalletAddress.address == address
@@ -39,6 +40,20 @@ async def get_or_create_user(session: Session, address: str, chain_family: enums
     session.commit()
     session.refresh(user)
 
+    # Обработка реферального кода
+    if referral_code:
+        referrer_id = referral_service.decode_referral_code(referral_code)
+        if referrer_id and referrer_id != user.id:
+            # Проверяем, не был ли пользователь уже кем-то приглашен (хотя это новый юзер, но для надежности)
+            if not user.referred_by:
+                referral = models.Referral(
+                    referrer_id=referrer_id,
+                    referee_id=user.id,
+                )
+                session.add(referral)
+                session.commit()
+                logger.info(f"User {user.id} was referred by user {referrer_id}")
+
     # Добавляем дефолтные проекты
     try:
         default_projects = session.execute(
@@ -56,6 +71,13 @@ async def get_or_create_user(session: Session, address: str, chain_family: enums
         logger.error(f"Error adding default projects to user {user.id}: {e}")
     
     return user
+
+async def is_new_address(session: Session, address: str) -> bool:
+    stmt = select(models.WalletAddress).where(
+        models.WalletAddress.address == address.lower()
+    )
+    wallet = session.execute(stmt).scalar_one_or_none()
+    return wallet is None
 
 async def fix_old_address_style(address: str, session: Session):
     # Фикс старой системы с lowercase адресами

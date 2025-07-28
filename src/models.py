@@ -40,6 +40,10 @@ class User(Base):
     promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
     selected_projects = relationship("UserSelectedProject", back_populates="user")
     user_plan_check = relationship("UserPlanCheck", back_populates="user")
+    
+    # Связи для реферальной системы
+    referrals_made = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer", cascade="all, delete-orphan")
+    referred_by = relationship("Referral", foreign_keys="Referral.referee_id", back_populates="referee", uselist=False)
 
     __table_args__ = (
         CheckConstraint('credits >= 0', name='credits_nonnegative'),
@@ -149,6 +153,20 @@ class PromoCodeUsage(Base):
     # Relationships
     promo_code = relationship("PromoCode", back_populates="usage")
     user = relationship("User", back_populates="promo_code_usage")
+
+
+class Referral(Base):
+    __tablename__ = 'referral'
+
+    id = Column(Integer, primary_key=True)
+    # пригласитель
+    referrer_id = Column(Integer, ForeignKey('user.id', ondelete="CASCADE"), nullable=False)
+    # приглашенный
+    referee_id = Column(Integer, ForeignKey('user.id', ondelete="CASCADE"), nullable=False, unique=True)
+    created_at = Column(Integer, default=utils_base.now_timestamp, nullable=False)
+
+    referrer = relationship("User", foreign_keys=[referrer_id], back_populates="referrals_made")
+    referee = relationship("User", foreign_keys=[referee_id], back_populates="referred_by")
 
 
 # модели для Yapps feed

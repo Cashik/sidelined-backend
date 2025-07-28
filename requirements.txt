@@ -35,3 +35,4 @@ starlette-admin[sqlalchemy]
 base58
 pandas
 openpyxl
+hashids
