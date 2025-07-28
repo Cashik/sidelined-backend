@@ -156,15 +156,11 @@ def is_valid_eth_address(address: str) -> bool:
         if not is_address(address):
             logger.warning(f"Invalid Ethereum address format: {address}")
             return False
-            
-        # Преобразуем в checksum формат и проверяем
-        checksum_address = to_checksum_address(address)
         
         # Дополнительная проверка для EIP-55 совместимости
-        if not is_checksum_address(checksum_address):
+        if not is_checksum_address(address):
             logger.warning(f"Address {address} is not in checksum format")
-            # Мы все равно возвращаем True, так как формат адреса корректный,
-            # но это может быть полезно для логирования
+            return False
         
         return True
     except Exception as e:
@@ -176,6 +172,13 @@ def is_valid_solana_address(address: str) -> bool:
     Проверяет, что строка является валидным Solana адресом (формат Base58)
     """
     try:
+        # TODO: использовать библиотеку solana-py или тд для проверки адреса
+        
+        # Проверяем, что адрес не в lowercase
+        if address.lower() == address:
+            logger.warning(f"Solana address is in lowercase: {address}")
+            return False
+        
         # Попытка декодирования из Base58
         decoded_bytes = base58.b58decode(address)
         # Публичный ключ в Solana имеет длину 32 байта

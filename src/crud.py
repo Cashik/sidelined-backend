@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def get_or_create_user(session: Session, address: str, chain_family: enums.ChainFamily) -> models.User:
     # Сначала ищем пользователя по адресу
     stmt = select(models.WalletAddress).where(
-        models.WalletAddress.address == address.lower()
+        models.WalletAddress.address == address
     )
     wallet = session.execute(stmt).scalar_one_or_none()
     
@@ -32,7 +32,7 @@ async def get_or_create_user(session: Session, address: str, chain_family: enums
     # Создаем запись адреса для пользователя
     wallet = models.WalletAddress(
         user_id=user.id,
-        address=address.lower(),
+        address=address,
         chain_family=chain_family
     )
     session.add(wallet)
@@ -57,6 +57,26 @@ async def get_or_create_user(session: Session, address: str, chain_family: enums
     
     return user
 
+async def fix_old_address_style(address: str, session: Session):
+    # Фикс старой системы с lowercase адресами
+    # раньше мы сохраняли адреса всегда в lowercase, но это неправильно
+    # теперь, мы пытаемся найти неправильные адреса и исправляем их
+    address_to_search = address.lower()
+    stmt = select(models.WalletAddress).where(
+        models.WalletAddress.address == address_to_search
+    )
+    wallets = session.execute(stmt).scalars().all()
+    if wallets:
+        logger.warning(f"Found {len(wallets)} wallets to fix")
+        for wallet in wallets:
+            wallet.address = address
+            session.add(wallet)
+            try:
+                session.commit()
+            except Exception as e:
+                logger.error(f"Error fixing wallet {wallet.id}: {e}")
+                session.rollback()
+    
 
 async def get_user_by_id(user_id: int, session: Session) -> Optional[models.User]:
     stmt = select(models.User).where(models.User.id == user_id)

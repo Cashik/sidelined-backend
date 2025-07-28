@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
+import logging
 
 from src import schemas, enums, models, crud, utils, exceptions
 from src.core.crypto import verify_signature, validate_payload, SOLANA_NETWORKS_IDS
@@ -12,6 +13,8 @@ from src.config.settings import settings
 from src.exceptions import (
     AddressAlreadyExistsError, AddressNotFoundError, LastAddressError, FactNotFoundError, APIError
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user", tags=["User"])
 
@@ -161,6 +164,7 @@ async def delete_wallet_address(
     
     Нельзя удалить последний адрес пользователя
     """
+    logger.info(f"Deleting wallet address: {request.address}")
     try:
         await crud.delete_user_address(
             user=user,

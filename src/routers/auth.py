@@ -31,12 +31,16 @@ async def do_login(request: schemas.LoginRequest, db: Session = Depends(get_sess
     else:
         chain_family = enums.ChainFamily.EVM
     
-    # Проверяем валидность payload и подписи
+    # Проверяем payload вместе с адресом
     if not validate_payload(request.payload):
         raise HTTPException(status_code=400, detail="Invalid payload")
     
+    # Проверяем подпись
     if not verify_signature(request.payload, request.signature):
         raise HTTPException(status_code=401, detail="Invalid signature")
+    
+    # Фикс старой системы с lowercase адресами
+    await crud.fix_old_address_style(request.payload.address, db)
     
     # Получаем или создаем пользователя
     user = await crud.get_or_create_user(

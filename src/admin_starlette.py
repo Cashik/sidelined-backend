@@ -45,6 +45,7 @@ from src.models import (
     ProjectLeaderboardHistory,
     ScorePayout,
     PostAuraScore,
+    WalletAddress,
 )
 from src import enums
 
@@ -286,12 +287,49 @@ class UserAdmin(AdminWriteModeratorReadView):
         IntegerField("used_credits_today", label="Credits Used Today", help_text="Credits used today"),
         BooleanField("pro_plan_promo_activated", label="Pro Plan Active", help_text="Is Pro plan promo activated"),
         JSONField("chat_settings", label="Chat Settings", required=False, help_text="Chat settings (JSON)"),
+        HasMany("wallet_addresses", label="Wallet Addresses", identity="wallet-address"),
         IntegerField("created_at", label="Created At", read_only=True),
     ]
     
     # Different fields for create and edit forms
-    exclude_fields_from_create = ["id", "created_at", "used_credits_today"]  # Don't set used credits when creating
-    exclude_fields_from_edit = ["id", "created_at"]  # Can edit credits when updating
+    exclude_fields_from_create = ["id", "created_at", "used_credits_today", "wallet_addresses"]
+    exclude_fields_from_edit = ["id", "created_at", "wallet_addresses"]
+
+
+class WalletAddressAdmin(BaseProtectedView):
+    identity = "wallet-address"
+    page_size = 100
+    searchable_fields = ["address", "user.preferred_name", "user.twitter_login"]
+    sortable_fields = ["id", "address", "chain_family", "created_at"]
+    
+    fields = [
+        IntegerField("id", label="ID"),
+        HasOne("user", label="User", identity="user"),
+        StringField("address", label="Address"),
+        EnumField("chain_family", label="Chain Family", enum=enums.ChainFamily),
+        IntegerField("created_at", label="Created At"),
+    ]
+
+    def can_create(self, request: Request) -> bool:
+        return False
+
+    def can_edit(self, request: Request) -> bool:
+        return False
+
+    def can_delete(self, request: Request) -> bool:
+        return False
+    
+    def get_list_query(self, request: Request):
+        from sqlalchemy.orm import joinedload
+        return super().get_list_query(request).options(
+            joinedload(WalletAddress.user)
+        )
+    
+    def get_object_query(self, request: Request):
+        from sqlalchemy.orm import joinedload
+        return super().get_object_query(request).options(
+            joinedload(WalletAddress.user)
+        )
 
 
 class ProjectAdmin(BaseProtectedView):
@@ -663,6 +701,7 @@ def setup_admin(app: Any) -> None:  # FastAPI/Starlette app
     # Register views with proper labels and icons
     admin.add_view(AdminUserAdmin(AdminUserModel, label="Admin Users", icon="fa fa-user-shield"))
     admin.add_view(UserAdmin(User, label="Users", icon="fa fa-users"))
+    admin.add_view(WalletAddressAdmin(WalletAddress, label="Wallet Addresses", icon="fa fa-wallet"))
     admin.add_view(ProjectAdmin(Project, label="Projects", icon="fa fa-project-diagram"))
     admin.add_view(SocialAccountAdmin(SocialAccount, label="Social Accounts", icon="fa fa-share-alt"))
     admin.add_view(ProjectAccountStatusAdmin(ProjectAccountStatus, label="Project Account Status", icon="fa fa-link"))
