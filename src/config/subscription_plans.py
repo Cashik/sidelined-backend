@@ -116,6 +116,17 @@ pro_plan_requirements = [
         ),
         balance=100
     ),
+    schemas.TokenRequirement(
+        token=schemas.Token(
+            chain_id=enums.ChainID.ETHEREUM,
+            address="0xe53EC727dbDEB9E2d5456c3be40cFF031AB40A55",
+            interface=enums.TokenInterface.ERC20,
+            decimals=18,
+            symbol="SUPER",
+            name="SuperVerse"
+        ),
+        balance=100
+    ),
 ]
 
 ultra_plan_requirements = [
