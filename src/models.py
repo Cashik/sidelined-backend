@@ -34,12 +34,12 @@ class User(Base):
     pro_plan_promo_activated = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships
-    chats = relationship("Chat", back_populates="user")
-    facts = relationship("UserFact", back_populates="user")
-    wallet_addresses = relationship("WalletAddress", back_populates="user")
-    promo_code_usage = relationship("PromoCodeUsage", back_populates="user")
-    selected_projects = relationship("UserSelectedProject", back_populates="user")
-    user_plan_check = relationship("UserPlanCheck", back_populates="user")
+    chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
+    facts = relationship("UserFact", back_populates="user", cascade="all, delete-orphan")
+    wallet_addresses = relationship("WalletAddress", back_populates="user", cascade="all, delete-orphan")
+    promo_code_usage = relationship("PromoCodeUsage", back_populates="user", cascade="all, delete-orphan")
+    selected_projects = relationship("UserSelectedProject", back_populates="user", cascade="all, delete-orphan")
+    user_plan_check = relationship("UserPlanCheck", back_populates="user", cascade="all, delete-orphan")
     
     # Связи для реферальной системы
     referrals_made = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer", cascade="all, delete-orphan")
@@ -499,5 +499,3 @@ class ScorePayout(Base):
     project_leaderboard_history = relationship('ProjectLeaderboardHistory', back_populates='scores')
     
 
-
-    
