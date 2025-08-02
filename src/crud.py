@@ -74,7 +74,7 @@ async def get_or_create_user(session: Session, address: str, chain_family: enums
 
 async def is_new_address(session: Session, address: str) -> bool:
     stmt = select(models.WalletAddress).where(
-        models.WalletAddress.address == address.lower()
+        models.WalletAddress.address == address
     )
     wallet = session.execute(stmt).scalar_one_or_none()
     return wallet is None
@@ -417,7 +417,7 @@ async def add_user_address(
 ) -> models.WalletAddress:
     # Проверяем, существует ли адрес в системе
     stmt = select(models.WalletAddress).where(
-        models.WalletAddress.address == address.lower()
+        models.WalletAddress.address == address
     )
     existing_address = session.execute(stmt).scalar_one_or_none()
     
@@ -427,7 +427,7 @@ async def add_user_address(
     # Создаем новый адрес
     wallet = models.WalletAddress(
         user_id=user.id,
-        address=address.lower(),
+        address=address,
         chain_family=chain_family
     )
     session.add(wallet)
@@ -455,7 +455,7 @@ async def delete_user_address(
     """
     # Получаем адрес
     stmt = select(models.WalletAddress).where(
-        models.WalletAddress.address == address.lower(),
+        models.WalletAddress.address == address,
         models.WalletAddress.user_id == user.id
     )
     wallet = session.execute(stmt).scalar_one_or_none()
